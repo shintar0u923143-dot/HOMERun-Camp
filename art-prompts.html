@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>HOMERun Camp Art Sheets</title>
+<style>
+  *{box-sizing:border-box}
+  body{margin:0;font-family:Arial,Helvetica,sans-serif;background:#F4F9EF;color:#1B1B1B;padding:16px;line-height:1.5;max-width:860px;margin:0 auto}
+  h1{color:#2E7D32;margin:0 0 4px;font-size:24px}
+  h2{color:#fff;background:#2E7D32;border-radius:10px;padding:8px 12px;margin:26px 0 6px;font-size:18px}
+  .note{background:#fff;border-radius:12px;padding:10px 14px;margin:8px 0;font-size:14px}
+  .note b{color:#2E7D32}
+  .item{background:#fff;border-radius:12px;padding:10px 12px;margin:10px 0;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+  .head{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  .name{font-weight:700;color:#2E7D32;font-size:15px;font-family:Consolas,monospace}
+  .gives{font-size:12px;color:#666;margin-top:3px}
+  .ratio{display:inline-block;font-size:12px;background:#EAF5E2;color:#2E7D32;border-radius:6px;padding:1px 7px;margin-left:6px;font-weight:700}
+  details pre{white-space:pre-wrap;word-wrap:break-word;background:#F7F7F7;border:1px solid #E0E0E0;border-radius:8px;padding:10px;font-size:13px;margin:8px 0 0;font-family:inherit}
+  summary{cursor:pointer;font-size:13px;color:#555;margin-top:4px}
+  button{background:#6DBE45;color:#fff;border:0;border-radius:8px;padding:8px 14px;font-weight:700;cursor:pointer;font-size:14px;white-space:nowrap}
+  button:hover{background:#2E7D32}
+  button.done{background:#2E7D32}
+  .count{font-size:13px;font-weight:400;margin-left:6px;opacity:.9}
+</style>
+</head>
+<body>
+<h1>HOMERun Camp Art Sheets</h1>
+<div class="note">
+  Each prompt makes <b>one image with several views on magenta</b>, for example the van in all three lanes. I cut them apart and name them for the game, so you only need <b>27 images</b> in total.<br><br>
+  <b>Steps:</b> click <b>Copy</b>, paste into Gemini, set the aspect ratio shown on the green label if Gemini lets you, then send me the result with its name (for example "sheet-obs-van"). Start with <b>Phase 1</b> so we can check the look early.<br><br>
+  <b>If a sheet comes out messy</b> (views touching or overlapping), just ask Gemini "same image, but with more magenta space between them".
+</div>
+<div id="list"></div>
+
+<script>
+const LOOK = "Style: stylized 3D render for a mobile endless-runner game in the look of Subway Surfers. Glossy plastic and painted materials, smooth rounded bevels, chunky cartoon proportions, bright saturated HOMER colors (leaf green #6DBE45, deep green #2E7D32, yellow-green #C6D62C, red #D32F2F, cream #FFF8E7), soft global lighting with ambient occlusion and a warm key light from the upper left. No ink outlines, no flat vector look, no text, no labels, no numbers, no watermark.";
+const BG = "Background: solid flat #FF00FF magenta everywhere, with no gradient, no floor, and no shadows on the background. Leave wide clear magenta gaps between the views so they don't touch or overlap.";
+const CAM = "Camera: a game chase camera about 2 meters behind and 1.5 meters above, looking slightly down (about 15 degrees).";
+
+function obstacleSheet(what) {
+  return [
+    `Make ONE wide landscape image showing the SAME object three times in a row, left to right, all the same size and standing on the same ground line, evenly spaced. Object: ${what}`,
+    "View 1 (left): how it looks when it is in the LEFT lane: from behind and a little from its RIGHT side, turned about 20 degrees, so the back and the right side both show.\nView 2 (middle): how it looks in the MIDDLE lane: exactly from behind, centered and symmetrical, no side visible.\nView 3 (right): how it looks in the RIGHT lane: from behind and a little from its LEFT side, turned about 20 degrees, so the back and the left side both show.",
+    CAM, LOOK, BG
+  ].join("\n\n");
+}
+const RUNNER = "the HOMER camper: a cheerful young hiker with short dark hair, an olive-yellow bucket hat, a green short-sleeve shirt, olive khaki cargo shorts, brown hiking boots and a large dark olive-green backpack, seen from BEHIND (face not visible)";
+function runnerSheet(lane) {
+  const angle = lane === 'mid' ? "exactly from behind, centered"
+    : lane === 'left' ? "from behind and slightly from his RIGHT side (turned about 12 degrees), because he is running in the left lane"
+    : "from behind and slightly from his LEFT side (turned about 12 degrees), because he is running in the right lane";
+  return [
+    `Make ONE image that is a character pose sheet of ${RUNNER}. Every pose is seen ${angle}. Same character, same size, same outfit and same lighting in every pose.`,
+    "Layout: 2 rows of 4 poses, evenly spaced.\nRow 1, left to right: running pose 1 (right foot forward, left arm forward), running pose 2 (passing pose, backpack bounced up), running pose 3 (left foot forward, right arm forward), running pose 4 (passing pose, backpack bounced down).\nRow 2, left to right: jumping (knees tucked, arms up), rolling (curled into a tight ball with the backpack on top), climbing a ladder (right hand up, left foot up), climbing a ladder (left hand up, right foot up).",
+    CAM, LOOK, BG
+  ].join("\n\n");
+}
+function propSheet(list, rows, cols, place) {
+  return [
+    `Make ONE image with ${list.length} separate scenery props arranged in a grid of ${rows} rows and ${cols} columns, evenly spaced, each standing on its own ground line. These stand beside a ${place} path and are seen from the path, from behind and slightly from the side.`,
+    list.map((p, i) => `${i + 1}. ${p}`).join("\n") + "\n(Numbered left to right, top row first.)",
+    CAM, LOOK, BG
+  ].join("\n\n");
+}
+const TILE = "Each tile is a perfectly TOP-DOWN view (camera pointing straight down, no perspective, no horizon). The path runs straight from the bottom edge to the top edge, centered, taking up the middle half of the tile, split into three equal lanes; the outer quarter on each side is the ground beside the path. The top and bottom edges of each tile should continue into each other so it can repeat. Flat things only (nothing taller than ankle height, no trees, no walls, no people) and no long shadows; even, soft lighting.";
+function tileSheet(place, look, a, b) {
+  return [
+    `Make ONE square image containing TWO separate tall ground tiles side by side. Each tile is twice as tall as it is wide. Separate them with a thin vertical strip of solid #FF00FF magenta, and put a thin magenta border around the outside.`,
+    TILE,
+    `Place: ${place}. ${look}`,
+    `Left tile: ${a}\nRight tile: ${b}`,
+    LOOK.replace("Style: stylized 3D render", "Style: stylized 3D-rendered textures")
+  ].join("\n\n");
+}
+function wallSheet(desc, items, key) {
+  return [
+    "Make ONE tall portrait image with FOUR wide wall strips stacked top to bottom. Each strip is twice as wide as it is tall and is a flat, straight-on side view of a wall (no perspective, like looking straight at the wall). The bottom of each strip is the floor line. Separate the strips with thin horizontal bands of solid #FF00FF magenta, with a thin magenta border around the outside. The left and right edges of each strip should continue into each other so it can repeat.",
+    desc,
+    items.map((t, i) => `Strip ${i + 1} (from the top): ${t}`).join("\n"),
+    key ? "Everything above the fence in each strip is solid flat #FF00FF magenta." : "",
+    LOOK
+  ].filter(Boolean).join("\n\n");
+}
+const HORIZON = (what) => [
+  `Make ONE wide landscape image of only the FAR DISTANCE at eye level, looking straight ahead: ${what} The bottom 15% of the image is the hazy distant tree line where the ground meets the sky. No path, no ground in front, nothing close to the camera.`,
+  LOOK
+].join("\n\n");
+
+const PHASES = [
+  { title: "Phase 1: Campsite (do these first)", items: [
+    { name: "sheet-tiles-camp-a", ratio: "1:1", gives: "tile-camp-01, tile-camp-02",
+      text: tileSheet("a campsite trail", "Packed light-brown dirt trail with soft wheel ruts in each lane and small pebbles, grassy edges; bright green grass with tiny flowers and grass tufts beside the path.",
+        "plain trail with a few pebbles and grass tufts.", "a few flat stones and fallen leaves on the grass beside the path.") },
+    { name: "sheet-tiles-camp-b", ratio: "1:1", gives: "tile-camp-03, tile-camp-04",
+      text: tileSheet("a campsite trail", "Same dirt trail and grass as the other camp tiles.",
+        "a flat stone campfire ring (no flames) on the grass on the left and a rolled-out picnic blanket on the right.", "a small puddle at the trail edge, flowers and a coil of rope on the grass.") },
+    { name: "horizon-camp", ratio: "16:9", gives: "horizon-camp",
+      text: HORIZON("soft blue sky with a few puffy cream clouds, far blue-green mountains, and a hazy distant pine forest edge.") },
+    { name: "sheet-props-camp", ratio: "3:2", gives: "6 props, left and right versions",
+      text: propSheet(["a tall cartoon pine tree with layered rounded branches (about 3 times a person's height)", "a shorter plump pine tree", "a round leafy tree with puffy yellow-green foliage", "a low round glossy green bush with small yellow flowers", "a wooden post with a hanging red camping lantern, glowing", "a small stack of cut logs next to a green camping chair"], 2, 3, "campsite trail") },
+    { name: "sheet-obs-van", ratio: "16:9", gives: "obs-left/mid/right-lane-van",
+      text: obstacleSheet("the REAR of a cream camper van with a leaf-green stripe, a dark green roof rack with camping gear, two round porthole windows on the back doors, red tail lights, a dark green bumper and a green metal ladder on the back door from the bumper to the roof. Show only the back part of the van; the van continues away from the camera.") },
+    { name: "sheet-obs-tent", ratio: "16:9", gives: "obs-left/mid/right-lane-tent",
+      text: obstacleSheet("a tall leaf-green dome camping tent with cream stripes, clearly taller than a person, with a big dark open archway at the bottom facing the camera (you could roll through it), ropes and red stakes at the sides.") },
+    { name: "sheet-obs-grill", ratio: "16:9", gives: "obs-left/mid/right-lane-grill",
+      text: obstacleSheet("a round deep-green kettle BBQ grill with the black lid propped open, glowing orange coals on a silver grate, a red handle, a small cream leaf badge on the bowl, and three short green legs. About knee height.") },
+    { name: "sheet-obs-hammock", ratio: "16:9", gives: "obs-left/mid/right-lane-hammock",
+      text: obstacleSheet("a cream canvas hammock with green and red stripes hung low between two short green wooden posts with twisted rope, spanning the lane from side to side, about knee height.") },
+    { name: "sheet-obs-canopy", ratio: "16:9", gives: "obs-left/mid/right-lane-canopy",
+      text: obstacleSheet("a pop-up camping canopy with a red and cream striped peaked roof on four dark green metal legs with cross braces, tall enough to run underneath, open side facing the camera.") },
+    { name: "sheet-runner-mid", ratio: "16:9", gives: "runner-mid-lane: 4 run, jump, roll, 2 climb",
+      text: runnerSheet('mid') }
+  ]},
+  { title: "Phase 2: Runner in the side lanes, bear and coin", items: [
+    { name: "sheet-runner-left", ratio: "16:9", gives: "runner-left-lane: 8 poses", text: runnerSheet('left') },
+    { name: "sheet-runner-right", ratio: "16:9", gives: "runner-right-lane: 8 poses", text: runnerSheet('right') },
+    { name: "sheet-bear-coin", ratio: "16:9", gives: "bear-run-01, bear-run-02, coin-leaf",
+      text: ["Make ONE wide image with three separate things in a row, evenly spaced:\n1. A big cartoon brown bear running toward the camera on all fours, mouth open, front paws reaching forward.\n2. The same bear running toward the camera, front paws pulled back, body bunched up.\n3. A shiny gold coin with a raised yellow-green leaf emblem and a thick rim, seen straight on.", CAM, LOOK, BG].join("\n\n") }
+  ]},
+  { title: "Phase 3: Inside the house", items: [
+    { name: "sheet-tiles-house-a", ratio: "1:1", gives: "tile-house-01, tile-house-02",
+      text: tileSheet("inside a house hallway", "Glossy green wooden floorboards running along the path, with a red runner rug down the middle lane; a cream baseboard color along the far left and right edges.",
+        "plain floorboards and the red rug.", "the red rug has a subtle cream leaf pattern border.") },
+    { name: "sheet-tiles-house-b", ratio: "1:1", gives: "tile-house-03, tile-house-enter",
+      text: tileSheet("inside a house hallway", "Same green floorboards and red rug as the other house tiles.",
+        "a small round woven mat on the floor beside the rug.", "the front doorway: the bottom half is the stone porch path from outside, the top half is the green wooden floor where the red rug starts, with a green doormat across the middle.") },
+    { name: "sheet-walls-house-left", ratio: "9:16", gives: "wall-house-left-01 to 04",
+      text: wallSheet("Cream interior hallway wall with a wooden baseboard at the bottom and a white crown molding at the top. This is the LEFT wall of the hallway.",
+        ["a window with bright daylight and a small potted plant on the sill.", "a cream shelf with green cleaning tools: broom, mop, dustpan and a yellow-green spray bottle.", "two framed camping pictures and a green step ladder leaning on the wall.", "a closed wooden door with coat hooks holding a green rain jacket."]) },
+    { name: "sheet-walls-house-right", ratio: "9:16", gives: "wall-house-right-01 to 04",
+      text: wallSheet("Cream interior hallway wall with a wooden baseboard at the bottom and a white crown molding at the top. This is the RIGHT wall of the hallway.",
+        ["a row of coat hooks with a backpack and a bucket hat.", "a window with daylight and green curtains.", "a cream cabinet with green cleaning supplies and a bucket.", "a wall clock and a framed leaf poster."]) },
+    { name: "sheet-obs-counter", ratio: "16:9", gives: "obs-left/mid/right-lane-counter",
+      text: obstacleSheet("the END of a long kitchen counter: cream cabinet doors, a warm wood counter top and a bowl of fruit on top. Only the near end shows; the counter continues away from the camera.") },
+    { name: "sheet-obs-table", ratio: "16:9", gives: "obs-left/mid/right-lane-table",
+      text: obstacleSheet("a wooden dining table with a red and white checked tablecloth, wide enough to fill the lane and tall enough to roll under, with a clear dark gap between the tabletop and the floor.") },
+    { name: "sheet-obs-chair", ratio: "16:9", gives: "obs-left/mid/right-lane-chair",
+      text: obstacleSheet("a wooden dining chair with a cushioned seat; the back of the chair faces the camera. About waist height.") },
+    { name: "sheet-obs-cat", ratio: "16:9", gives: "obs-left/mid/right-lane-cat",
+      text: obstacleSheet("a chubby orange tabby house cat sitting sideways across the lane, tail curled, looking back at the camera with big green eyes. Cute and friendly.") },
+    { name: "sheet-obs-wagon", ratio: "16:9", gives: "obs-left/mid/right-lane-wagon",
+      text: obstacleSheet("the HOMER foldable utility wagon: beige canvas basket on a black steel frame, black pull handle facing the camera, four chunky black wheels, with a glowing yellow-green ring on the floor under it.") }
+  ]},
+  { title: "Phase 4: Backyard", items: [
+    { name: "sheet-tiles-yard-a", ratio: "1:1", gives: "tile-backyard-01, tile-backyard-02",
+      text: tileSheet("a sunny backyard", "Bright green lawn with cream rounded stepping stones forming a path across all three lanes; neat flower-bed edging along the outer sides.",
+        "plain stepping stones and lawn.", "a few darker gray-green stones and small daisies in the grass.") },
+    { name: "sheet-tiles-yard-b", ratio: "1:1", gives: "tile-backyard-03, tile-backyard-exit",
+      text: tileSheet("a sunny backyard", "Same lawn and stepping stones as the other yard tiles.",
+        "a garden hose lying flat in a loop on the grass on the left side.", "the back door: the bottom half is the green wooden floor where the red rug ends, the top half is the lawn with the first stepping stones, with a green doormat across the middle.") },
+    { name: "sheet-fence", ratio: "9:16", gives: "wall-yard-left-01/02, wall-yard-right-01/02",
+      text: wallSheet("A cream picket fence with deep green posts and climbing yellow-green vines.",
+        ["fence on the LEFT side of the yard.", "fence on the LEFT side of the yard, with a few red flowers in the vines.", "fence on the RIGHT side of the yard.", "fence on the RIGHT side of the yard, with a few red flowers in the vines."], true) },
+    { name: "sheet-props-yard", ratio: "1:1", gives: "4 props, left and right versions",
+      text: propSheet(["a round topiary-style garden tree with glossy green leaves", "a large glossy yellow-green hedge ball", "a deep green flower pot with red and yellow flowers", "a short cream garden lamp post with a green cap"], 2, 2, "backyard stepping-stone") },
+    { name: "horizon-backyard", ratio: "16:9", gives: "horizon-backyard",
+      text: HORIZON("soft blue sky with puffy cream clouds, and hazy distant rooftops and round trees.") }
+  ]}
+];
+
+const list = document.getElementById('list');
+const ALL = [];
+function copyText(text, btn) {
+  const label = btn.textContent;
+  const done = () => { btn.textContent = 'Copied!'; btn.classList.add('done'); setTimeout(() => { btn.textContent = label; btn.classList.remove('done'); }, 1400); };
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text; ta.style.position = 'fixed'; ta.style.opacity = '0';
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand('copy'); done(); } catch (e) {}
+    document.body.removeChild(ta);
+  };
+  if (navigator.clipboard && window.isSecureContext) navigator.clipboard.writeText(text).then(done, fallback);
+  else fallback();
+}
+PHASES.forEach(ph => {
+  const h = document.createElement('h2');
+  h.innerHTML = `${ph.title}<span class="count">(${ph.items.length} images)</span>`;
+  list.appendChild(h);
+  ph.items.forEach(it => {
+    const i = ALL.push(it) - 1;
+    const box = document.createElement('div'); box.className = 'item';
+    box.innerHTML = `<div class="head"><span><span class="name">[${it.name}]</span><span class="ratio">${it.ratio}</span></span><button data-i="${i}">Copy</button></div>
+      <div class="gives">I'll cut this into: ${it.gives}</div>
+      <details><summary>Show prompt</summary><pre></pre></details>`;
+    box.querySelector('pre').textContent = it.text;
+    list.appendChild(box);
+  });
+});
+list.addEventListener('click', e => {
+  const b = e.target.closest('button[data-i]');
+  if (b) copyText(ALL[+b.dataset.i].text, b);
+});
+</script>
+</body>
+</html>

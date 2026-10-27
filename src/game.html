@@ -1,0 +1,1436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover" />
+<meta name="theme-color" content="#2E7D32" />
+<title>HOMERun Camp</title>
+<style>
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;background:#1f4d1c;overflow:hidden;font-family:Arial,Helvetica,sans-serif;touch-action:none;-webkit-user-select:none;user-select:none}
+  body{display:flex;align-items:center;justify-content:center}
+  #stage{position:relative;height:min(100vh,calc(100vw * 7 / 4));aspect-ratio:4/7;width:auto;max-width:100vw}
+  #game{display:block;width:100%;height:100%}
+  #overlay{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(15,40,15,.45)}
+  #overlay.hidden{display:none}
+  .card{background:#FFF8E7;color:#1B1B1B;border-radius:18px;padding:16px 16px 18px;width:88%;max-height:94%;overflow:auto;text-align:center;box-shadow:0 10px 30px rgba(0,0,0,.4)}
+  .logo{font-weight:900;font-size:40px;letter-spacing:4px;color:#6DBE45;line-height:1;text-shadow:0 3px 0 #2E7D32}
+  .sub{font-weight:800;font-size:16px;color:#2E7D32;letter-spacing:6px;margin:8px 0 10px}
+  .how{font-size:13px;line-height:1.55;text-align:left;background:#fff;border-radius:12px;padding:8px 12px;margin:8px 0}
+  input{width:100%;padding:11px;font-size:16px;border:2px solid #2E7D32;border-radius:10px;margin:6px 0;outline:none}
+  button{width:100%;margin-top:8px;padding:12px;font-size:17px;font-weight:700;color:#fff;background:#6DBE45;border:0;border-radius:12px;cursor:pointer;box-shadow:0 4px 0 #2E7D32}
+  button.alt{background:#2E7D32;box-shadow:0 4px 0 #1B4D1B}
+  button:disabled{background:#bdbdbd;box-shadow:none;cursor:not-allowed}
+  .board{margin-top:12px;text-align:left}
+  .board b{display:block;text-align:center;margin-bottom:6px;color:#2E7D32}
+  .row{display:flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;background:#fff;margin-bottom:4px;font-size:14px}
+  .row .rk{width:24px;font-weight:800;color:#2E7D32}
+  .row .nm{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .row .sc{font-weight:800}
+  .gold{background:#FFE58A !important}
+  .silver{background:#E6E6E6 !important}
+  .bronze{background:#F2C7A0 !important}
+  .me{outline:2px solid #2E7D32}
+  .big{font-size:32px;font-weight:900;color:#2E7D32;margin:6px 0}
+  .reason{color:#D32F2F;font-weight:700;margin-bottom:4px}
+</style>
+</head>
+<body>
+<div id="stage">
+  <canvas id="game"></canvas>
+  <div id="overlay"><div class="card" id="card"></div></div>
+</div>
+
+<script>
+(() => {
+'use strict';
+
+// ============ ASSETS (Gemini art; build step inlines these) ============
+// Filled in by tools/build.py from every image in assets/ (key = file name without extension).
+// Anything missing falls back to the previous art, so new images can be added a few at a time.
+const ASSETS = /*ASSETS*/{};
+const IMG = {};
+for (const k in ASSETS) { const im = new Image(); im.src = ASSETS[k]; IMG[k] = im; }
+const ok = im => !!(im && im.complete && im.naturalWidth > 0);
+const img = key => (ok(IMG[key]) ? IMG[key] : null);
+const LANE_NAME = ['left', 'mid', 'right'];
+
+// ============ CONSTANTS ============
+const W = 400, H = 700;
+const DPR = Math.min(2, window.devicePixelRatio || 1);
+
+// Behind-the-back chase camera (horizon matched to the vanishing point of the backdrops)
+const HOR = H * 0.48;
+const CAM_BACK = 4.5;        // a longer lens keeps obstacles readable further ahead
+const CAM_H = 1.0;
+const F = 1148;              // F / CAM_BACK keeps the runner the same size on screen
+const LANE_W = 0.42;
+const ROAD_HALF = 0.66;
+const VIEW_FAR = 220;
+const SPAWN_Z = 60;
+const PH = 0.15;             // runner half-depth for collisions
+
+// Runner physics, in px at the runner's depth. Jump apex ~106 px, ~0.92 s in the air.
+const GRAV = 1000, JUMP_V = 460;
+const ROLL_TIME = 0.55;
+const VAN_H = 116;           // camper van roof height
+const COUNTER_H = 100;       // kitchen counter top height
+const PX2W = CAM_BACK / F;   // px at runner depth -> world units
+
+const C = { green:'#6DBE45', deep:'#2E7D32', leaf:'#C6D62C', red:'#D32F2F', ink:'#1B1B1B', cream:'#FFF8E7', white:'#FFFFFF' };
+
+// Image sprites: display height in px at the runner's depth (the runner is ~110 px tall).
+// crop = [sx, sy, sw, sh] in the image's own pixels.
+const SPR = {
+  grill:   { key:'grill',   h:72 },
+  hammock: { key:'hammock', h:70 },
+  tent:    { key:'tent',    h:140 },
+  canopy:  { key:'canopy',  h:165 },
+  van:     { key:'van',     h:148, crop:[195, 0, 317, 475] }   // rear face only; the length is built in 3D
+};
+
+// kind: jump = be airborne high enough | roll = be rolling | both = jump OR roll
+//       ramp = run up, across the top and down | pass = no collision | boost = speed-up pickup
+const TYPES = {
+  grill:   { half:0.35, kind:'jump', clear:58,  lethal:true,  base:28, shadow:34 },
+  tent:    { half:0.45, kind:'roll',            lethal:true,  base:0,  shadow:84 },
+  hammock: { half:0.30, kind:'both', clear:45,  lethal:true,  base:18, shadow:46 },
+  van:     { half:1.70, kind:'ramp', topH:VAN_H, hw:0.235, lethal:false, base:56,
+             roof:'#356E33', wall:'#F1E8D0', stripe:'#8CC63F', skirt:'#2F6A2E', band:[0.28, 0.40], wheels:true },
+  canopy:  { half:0.45, kind:'pass',            lethal:false, base:34, shadow:70 },
+  table:   { half:0.55, kind:'roll',            lethal:true,  base:0,  shadow:62 },
+  chair:   { half:0.30, kind:'jump', clear:80,  lethal:true,  base:0,  shadow:32 },
+  counter: { half:2.20, kind:'ramp', topH:COUNTER_H, hw:0.204, lethal:false, base:0,
+             roof:'#B98B62', wall:'#EADCC0', stripe:'#D9C7A2', skirt:'#8D6E63', band:[0.10, 0.13], wheels:false },
+  cat:     { half:0.30, kind:'jump', clear:50,  lethal:true,  base:0,  shadow:30 },
+  wagon:   { half:0.50, kind:'boost',           lethal:false, base:0,  shadow:44 }
+};
+const POOLS = {
+  outdoor:  ['grill','grill','tent','hammock','van','canopy'],
+  house:    ['table','table','chair','cat','counter','wagon'],
+  backyard: ['grill','tent','hammock','van','canopy','grill']
+};
+const REASON = {
+  grill:   'You hit the BBQ grill!',
+  tent:    'You got caught by the tent!',
+  hammock: 'You got tangled in the hammock!',
+  table:   'You bumped the table!',
+  chair:   'You tripped on the chair!',
+  cat:     'The house cat tripped you up!'
+};
+
+// Stage loop (meters): campsite -> house -> backyard -> back to camp, repeating
+const STAGES = [
+  { id:'outdoor',  name:'CAMPSITE',         len:200 },
+  { id:'house',    name:'INSIDE THE HOUSE', len:160 },
+  { id:'backyard', name:'BACKYARD',         len:200 },
+  { id:'outdoor',  name:'BACK TO CAMP',     len:200 }
+];
+const CYCLE = STAGES.reduce((a, s) => a + s.len, 0);
+const BOUNDS = []; { let acc = 0; for (const s of STAGES) { acc += s.len; BOUNDS.push(acc); } }
+function stageIndexAt(d) {
+  let m = ((d % CYCLE) + CYCLE) % CYCLE;
+  for (let i = 0; i < STAGES.length; i++) {
+    if (m < STAGES[i].len) return i;
+    m -= STAGES[i].len;
+  }
+  return 0;
+}
+// Backdrops: vanishing point (fraction of the image) is pinned to the horizon
+const BGS = {
+  outdoor:  { key:'bg-camp',     vx:0.5, vy:0.494, fog:'#D3E7E6' },
+  house:    { key:'bg-house',    vx:0.5, vy:0.500, fog:'#EFEAE0' },
+  backyard: { key:'bg-backyard', vx:0.5, vy:0.458, fog:'#DCEDEF' },
+  facade:   { key:'bg-facade',   vx:0.5, vy:0.564, fog:'#E6EFE9' }
+};
+
+// ---- scrolling world (used as soon as a stage has its ground tiles) ----
+// Ground tiles are top-down 1:2 images: the path is the middle 50% of the width.
+const TILE_W = ROAD_HALF * 4;          // world width of one ground tile (path = half of it)
+const TILE_L = TILE_W * 2;             // world length of one ground tile
+const THEME = {
+  outdoor:  { tiles:'tile-camp', horizon:'horizon-camp', horizonY:0.97, sky:['#8FD6F2', '#E4F6F8'], side:'#7DBB52',
+              props:['pine-tall','pine-round','leafy-tree','bush','lantern-post','log-pile'], propX:[1.05, 2.6], propGap:2.4 },
+  house:    { tiles:'tile-house', enter:'tile-house-enter', walls:'wall-house', wallX:1.32, wallH:1.6, wallL:3.2,
+              ceiling:['#F5EEDF', '#E6DAC4', '#FFFBEF'], side:'#4F8E36', props:[] },
+  backyard: { tiles:'tile-backyard', enter:'tile-backyard-exit', horizon:'horizon-backyard', horizonY:0.86, sky:['#8FD3F4', '#E6F5F8'], side:'#5AA845',
+              walls:'wall-yard', wallX:1.5, wallH:0.5, wallL:2.0,
+              props:['round-tree','hedge-ball','flower-pot','garden-lamp'], propX:[1.75, 2.8], propGap:2.2 }
+};
+// prop display heights in px at the runner's depth (runner ~118 px)
+const PROP_H = { 'pine-tall':340, 'pine-round':240, 'leafy-tree':270, 'bush':95, 'lantern-post':160, 'log-pile':95,
+                 'round-tree':250, 'hedge-ball':120, 'flower-pot':75, 'garden-lamp':130 };
+const tileCache = {};
+function tilesOf(prefix) {
+  const hit = tileCache[prefix];
+  if (hit && hit.length) return hit;
+  const list = [];
+  for (let i = 1; i <= 8; i++) { const im = img(`${prefix}-0${i}`); if (im) list.push(im); }
+  tileCache[prefix] = list;
+  return list;
+}
+function wallsOf(prefix, side) { return tilesOf(`${prefix}-${side}`); }
+const tileMode = id => tilesOf(THEME[id].tiles).length > 0;
+const HOUSE_APPROACH = 62;   // meters before the house door where the facade appears
+
+// ============ CANVAS ============
+const cv = document.getElementById('game');
+cv.width = W * DPR; cv.height = H * DPR;
+const mainCtx = cv.getContext('2d');
+mainCtx.imageSmoothingQuality = 'high';
+let ctx = mainCtx;
+let fogCol = '#D3E7E6';
+const overlay = document.getElementById('overlay');
+const card = document.getElementById('card');
+const stageEl = document.getElementById('stage');
+
+// ============ STORAGE (per device; swap for a shared backend if needed) ============
+const KEY_SCORES = 'homer-camp-run-scores';
+const KEY_NAME = 'homer-camp-run-name';
+function safeGet(k) { try { return localStorage.getItem(k) || ''; } catch (e) { return ''; } }
+function safeSet(k, v) { try { localStorage.setItem(k, v); } catch (e) {} }
+function loadScores() { try { return JSON.parse(safeGet(KEY_SCORES)) || []; } catch (e) { return []; } }
+function saveScore(name, pts, at) {
+  const all = loadScores();
+  all.push({ name, score: pts, at });
+  all.sort((a, b) => b.score - a.score);
+  safeSet(KEY_SCORES, JSON.stringify(all.slice(0, 10)));
+  const idx = all.findIndex(e => e.at === at);
+  return (idx >= 0 && idx < 10) ? idx + 1 : null;
+}
+function esc(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function boardHTML(hl) {
+  const list = loadScores();
+  if (!list.length) return '<div class="row"><span class="nm">No scores yet. Be the first!</span></div>';
+  return list.map((e, i) =>
+    `<div class="row ${i===0?'gold':i===1?'silver':i===2?'bronze':''} ${e.at===hl?'me':''}">` +
+    `<span class="rk">${i+1}</span><span class="nm">${esc(e.name)}</span><span class="sc">${e.score}</span></div>`
+  ).join('');
+}
+
+// ============ STATE ============
+let state = 'title';
+let playerName = safeGet(KEY_NAME);
+let player, obstacles, coins, popups;
+let dist, speed, spawnAcc, nextGap, bonus, coinCount, boostT;
+let bearD, lastNear, wipe, wipeCol, lastStage, time = 0, idleDist = 0;
+let deathReason = '';
+let lastFrameTs = 0;
+
+function reset() {
+  player = { lane:1, xw:0, h:0, vh:0, airborne:false, roll:0, onRamp:false, climb:false };
+  obstacles = []; coins = []; popups = [];
+  dist = 0; speed = 6;
+  spawnAcc = 0; nextGap = 12;
+  bonus = 0; coinCount = 0; boostT = 0;
+  bearD = 1; lastNear = -99; wipe = 0; wipeCol = '#FFFFFF'; lastStage = 0; time = 0;
+}
+function score() { return Math.floor(dist) + bonus; }
+function addPopup(text, x, y, color, life) { popups.push({ text, x, y, color, t:0, life }); }
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+
+// ============ PROJECTION ============
+function P(xw, yw, z) {
+  const d = z + CAM_BACK;
+  return { x: W / 2 + F * xw / d, y: HOR + F * (CAM_H - yw) / d, k: CAM_BACK / d, d };
+}
+function laneX(lane) { return (lane - 1) * LANE_W; }
+function poly(pts, fill, stroke, lw) {
+  ctx.beginPath(); ctx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i].x, pts[i].y);
+  ctx.closePath();
+  if (fill) { ctx.fillStyle = fill; ctx.fill(); }
+  if (stroke) { ctx.strokeStyle = stroke; ctx.lineWidth = lw || 1.5; ctx.stroke(); }
+}
+function fogAt(z) { return clamp((z - 8) / 110, 0, 0.75); }
+
+// Sprites are painted into an offscreen canvas at their on-screen resolution, hazed toward
+// the stage's horizon colour by distance, then composited. Keeps the 3D art crisp and blended.
+const OFF_W = 380, OFF_H = 420, OX = 190, OY = 390;   // room for tall side props (trees)
+const off = document.createElement('canvas');
+off.width = Math.ceil(OFF_W * DPR * 2); off.height = Math.ceil(OFF_H * DPR * 2);
+const octx = off.getContext('2d');
+octx.imageSmoothingQuality = 'high';
+
+function sprite(xw, z, fn, base, lift) {
+  const p = P(xw, 0, z);
+  if (p.d < 0.35) return;
+  const k = p.k;
+  const sc = DPR * clamp(k, 0.12, 2);
+  const w = Math.ceil(OFF_W * sc), h = Math.ceil(OFF_H * sc);
+  octx.setTransform(1, 0, 0, 1, 0, 0);
+  octx.clearRect(0, 0, w + 2, h + 2);
+  octx.setTransform(sc, 0, 0, sc, OX * sc, OY * sc);
+  ctx = octx; fn(0, 0); ctx = mainCtx;
+  const f = fogAt(z);
+  if (f > 0) {
+    octx.save();
+    octx.setTransform(1, 0, 0, 1, 0, 0);
+    octx.globalCompositeOperation = 'source-atop';
+    octx.globalAlpha = f;
+    octx.fillStyle = fogCol;
+    octx.fillRect(0, 0, w, h);
+    octx.restore();
+  }
+  const by = p.y - (base + (lift || 0)) * k;
+  mainCtx.drawImage(off, 0, 0, w, h, p.x - OX * k, by - OY * k, OFF_W * k, OFF_H * k);
+}
+
+// Display heights for per-lane obstacle images (obs-left-lane-van, obs-mid-lane-van, ...).
+// shift = how far (fraction of width) to slide a side-angled image so its back face sits on the lane.
+const LANE_SPR = {
+  grill:{ h:74 }, tent:{ h:140 }, hammock:{ h:72 }, canopy:{ h:165 },
+  van:{ h:150, shift:0.12 }, counter:{ h:112, shift:0.10 },
+  table:{ h:108 }, chair:{ h:100 }, cat:{ h:62 }, wagon:{ h:110 }
+};
+function laneImage(type, lane) { return img(`obs-${LANE_NAME[lane]}-lane-${type}`); }
+
+// image-or-fallback sprite painter for an obstacle type in a lane
+function painter(type, lane) {
+  const li = lane === undefined ? null : laneImage(type, lane);
+  if (li) {
+    const s = LANE_SPR[type] || { h:100 };
+    return () => {
+      const h = s.h, w = h * li.naturalWidth / li.naturalHeight;
+      const shift = (s.shift || 0) * w * (lane === 0 ? 1 : lane === 2 ? -1 : 0);
+      ctx.drawImage(li, -w / 2 + shift, -h, w, h);
+    };
+  }
+  const s = SPR[type];
+  return () => {
+    const im = s && IMG[s.key];
+    if (!ok(im)) return (FALLBACK[type] || HOUSE_DRAW[type])(0, 0);
+    const c = s.crop || [0, 0, im.naturalWidth, im.naturalHeight];
+    const h = s.h, w = h * c[2] / c[3];
+    ctx.drawImage(im, c[0], c[1], c[2], c[3], -w / 2, -h, w, h);
+  };
+}
+function baseOf(type, lane) {
+  if (lane !== undefined && laneImage(type, lane)) return 0;
+  const s = SPR[type];
+  if (s && ok(IMG[s.key])) return 0;
+  return HOUSE_DRAW[type] ? 0 : TYPES[type].base;
+}
+
+// ============ ACTIONS ============
+function jump() {
+  if (state !== 'play') return;
+  if (!player.airborne && player.roll <= 0 && player.h <= 0.5) {
+    player.airborne = true; player.vh = JUMP_V;
+  }
+}
+function rollDown() {
+  if (state !== 'play') return;
+  if (!player.airborne && player.h <= 0.5) player.roll = ROLL_TIME;
+}
+function rampAhead(lane) {
+  return obstacles.some(o => {
+    const T = TYPES[o.type];
+    return T.kind === 'ramp' && o.lane === lane && !o.done && Math.abs(o.z) < T.half + PH + 0.8;
+  });
+}
+function moveLane(d) {
+  if (state !== 'play') return;
+  const target = player.lane + d;
+  if (target < 0 || target > 2) return;
+  if (d > 0 && rampAhead(target)) bearAppear();   // swiping right into a counter or van
+  player.lane = target;
+}
+
+// ============ INPUT ============
+let sw = null;
+stageEl.addEventListener('pointerdown', e => { sw = { x:e.clientX, y:e.clientY }; });
+stageEl.addEventListener('pointerup', e => {
+  if (!sw) return;
+  const dx = e.clientX - sw.x, dy = e.clientY - sw.y;
+  sw = null;
+  if (state !== 'play') return;
+  if (Math.max(Math.abs(dx), Math.abs(dy)) < 30) return;
+  if (Math.abs(dx) > Math.abs(dy)) moveLane(dx < 0 ? -1 : 1);
+  else if (dy < 0) jump();
+  else rollDown();
+});
+window.addEventListener('keydown', e => {
+  if (state !== 'play') return;
+  const k = e.key;
+  if (k === 'ArrowLeft' || k === 'a' || k === 'A') moveLane(-1);
+  else if (k === 'ArrowRight' || k === 'd' || k === 'D') moveLane(1);
+  else if (k === 'ArrowUp' || k === 'w' || k === 'W' || k === ' ') jump();
+  else if (k === 'ArrowDown' || k === 's' || k === 'S') rollDown();
+  else return;
+  e.preventDefault();
+});
+
+// ============ SCREENS ============
+function startGame() {
+  reset();
+  state = 'play';
+  overlay.classList.add('hidden');
+  addPopup('RUN!', W / 2, H * 0.4, C.deep, 1.0);
+}
+
+function showTitle() {
+  state = 'title';
+  overlay.classList.remove('hidden');
+  card.innerHTML = `
+    <div class="logo" style="font-size:38px">HOMERun</div>
+    <div class="sub">CAMP</div>
+    <div class="how"><b>How to play</b><br>
+      &bull; Swipe left / right to change lanes<br>
+      &bull; Swipe up to jump the BBQ grill, chairs, the cat and the hammock<br>
+      &bull; Swipe down to roll under the tent, the table and the hammock<br>
+      &bull; Run up the ladder or counter top, across the top, and back down<br>
+      &bull; Grab the wagon for a speed boost<br>
+      &bull; Swiping right into a counter or van brings the bear<br>
+      &bull; Collect the HOMER leaf coins. One life. Three close calls and the bear catches you!
+    </div>
+    <input id="pname" maxlength="16" placeholder="Enter your name" value="${esc(playerName)}" />
+    <button id="startBtn" ${playerName.trim() ? '' : 'disabled'}>START RUN</button>
+    <div class="board"><b>Top 10 Scoreboard</b>${boardHTML(null)}</div>`;
+  const inp = card.querySelector('#pname');
+  const btn = card.querySelector('#startBtn');
+  const go = () => {
+    const n = inp.value.trim();
+    if (!n) return;
+    playerName = n;
+    safeSet(KEY_NAME, n);
+    startGame();
+  };
+  inp.addEventListener('input', () => { btn.disabled = !inp.value.trim(); });
+  inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
+  btn.addEventListener('click', go);
+}
+
+function showOver() {
+  const at = Date.now();
+  const pts = score();
+  const rank = saveScore(playerName, pts, at);
+  overlay.classList.remove('hidden');
+  card.innerHTML = `
+    <div class="logo" style="font-size:30px">GAME OVER</div>
+    <div class="reason">${esc(deathReason)}</div>
+    <div class="big">${pts}</div>
+    <div>${esc(playerName)} &middot; ${rank ? 'You placed #' + rank + '!' : 'Keep running to reach the Top 10!'}</div>
+    <button id="againBtn">PLAY AGAIN</button>
+    <button id="newBtn" class="alt">NEW PLAYER</button>
+    <div class="board"><b>Top 10 Scoreboard</b>${boardHTML(at)}</div>`;
+  card.querySelector('#againBtn').onclick = startGame;
+  card.querySelector('#newBtn').onclick = showTitle;
+}
+
+function die(reason) {
+  if (state !== 'play') return;
+  state = 'over';
+  deathReason = reason;
+  setTimeout(showOver, 300);
+}
+
+function bearAppear() {
+  lastNear = time;
+  bearD = Math.max(0, bearD - 0.34);
+  addPopup('BEAR!', P(player.xw, 0, 0).x, H * 0.62, C.red, 1.0);
+  if (bearD <= 0) die('The bear caught you!');
+}
+function nearMiss() {
+  bonus += 50;
+  addPopup('CLOSE CALL!', P(player.xw, 0, 0).x, H * 0.62 - 40, C.leaf, 1.0);
+  bearAppear();
+}
+
+// ============ SPAWNING ============
+// keep stage changes clear of obstacles so the doorway and transitions read cleanly
+function nearBoundary(a) {
+  const m = ((a % CYCLE) + CYCLE) % CYCLE;
+  if (m < 8) return true;
+  for (let i = 0; i < BOUNDS.length; i++) {
+    const pre = STAGES[(i + 1) % STAGES.length].id === 'house' ? HOUSE_APPROACH + 2 : 22;
+    if (m > BOUNDS[i] - pre && m < BOUNDS[i] + 10) return true;
+  }
+  return false;
+}
+
+function spawnRow() {
+  const arrive = dist + SPAWN_Z;
+  if (nearBoundary(arrive)) {
+    for (let k = 0; k < 4; k++) coins.push({ lane:1, z: SPAWN_Z - k * 1.6, h:0, got:false });
+    return;
+  }
+  const sid = STAGES[stageIndexAt(arrive)].id;
+  const pool = POOLS[sid];
+  const lanesAll = [0, 1, 2].sort(() => Math.random() - 0.5);
+  const count = (dist > 150 && Math.random() < 0.3) ? 2 : 1;   // always leave one lane open
+  const used = [];
+  for (let i = 0; i < count; i++) {
+    const lane = lanesAll[i];
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    const o = { type, lane, z:SPAWN_Z, done:false, tight:false, bonus:false, used:false };
+    obstacles.push(o);
+    addCoinsOn(o);
+    used.push(lane);
+  }
+  const free = [0, 1, 2].filter(l => !used.includes(l));
+  if (free.length && Math.random() < 0.6) {
+    const lane = free[Math.floor(Math.random() * free.length)];
+    for (let k = 0; k < 6; k++) coins.push({ lane, z: SPAWN_Z - k * 1.4, h:0, got:false });
+  }
+}
+
+// coin trails: arcs over jumps, hover over rolls, sit on tops, on the ground through canopy/wagon
+function addCoinsOn(o) {
+  const add = (z, h) => coins.push({ lane:o.lane, z, h, got:false });
+  switch (o.type) {
+    case 'grill': case 'hammock': case 'cat':
+      for (let j = -3; j <= 3; j++) add(o.z + j * 0.45, 92 - j * j * 8);
+      break;
+    case 'chair':
+      for (let j = -3; j <= 3; j++) add(o.z + j * 0.45, 100 - j * j * 6);
+      break;
+    case 'tent': case 'table':
+      for (let j = -2; j <= 2; j++) add(o.z + j * 0.5, 22);
+      break;
+    case 'van': case 'counter':
+      for (let j = -3; j <= 3; j++) add(o.z + j * 0.6, TYPES[o.type].topH + 6);
+      break;
+    case 'canopy': case 'wagon':
+      for (let j = -2; j <= 2; j++) add(o.z + j * 0.6, 0);
+      break;
+  }
+}
+
+// ============ UPDATE ============
+function update(dt) {
+  time += dt;
+  if (boostT > 0) boostT = Math.max(0, boostT - dt);
+  speed = Math.min(13, 6 + dist * 0.012) * (boostT > 0 ? 1.6 : 1);
+  const travel = speed * dt;
+  dist += travel;
+
+  const si = stageIndexAt(dist);
+  if (si !== lastStage) {
+    const changed = STAGES[si].id !== STAGES[lastStage].id;
+    lastStage = si;
+    // with scrolling tiles the next area is already visible ahead, so only the front door gets a flash
+    const seamless = tileMode(STAGES[si].id) && STAGES[si].id !== 'house';
+    if (changed && !seamless) { wipe = 1; wipeCol = STAGES[si].id === 'house' ? '#FFE7A8' : '#FFFFFF'; }
+    addPopup(STAGES[si].name, W / 2, H * 0.3, C.deep, 1.4);
+  }
+  if (wipe > 0) wipe = Math.max(0, wipe - dt * 1.6);
+
+  // runner physics
+  if (player.airborne) {
+    player.vh -= GRAV * dt;
+    player.h += player.vh * dt;
+    if (player.h <= 0) { player.h = 0; player.vh = 0; player.airborne = false; }
+  }
+  if (player.roll > 0) player.roll = Math.max(0, player.roll - dt);
+  player.xw += (laneX(player.lane) - player.xw) * Math.min(1, dt * 14);
+
+  // spawning
+  spawnAcc += travel;
+  if (spawnAcc >= nextGap) {
+    spawnAcc -= nextGap;
+    spawnRow();
+    nextGap = Math.max(5.5, 9.5 + Math.random() * 4 - dist * 0.01);
+  }
+
+  // obstacles
+  player.onRamp = false; player.climb = false;
+  for (const o of obstacles) {
+    o.z -= travel;
+    const T = TYPES[o.type];
+    const inZ = Math.abs(o.z) < T.half + PH;
+
+    if (inZ && o.lane === player.lane && !o.done) {
+      if (T.kind === 'ramp') {
+        const u = clamp((PH + T.half - o.z) / (2 * T.half + 2 * PH), 0, 1);
+        let target;
+        if (u < 0.22) { target = T.topH * (u / 0.22); player.climb = true; }
+        else if (u > 0.8) target = T.topH * ((1 - u) / 0.2);
+        else target = T.topH;
+        player.h = target; player.vh = 0; player.airborne = false; player.onRamp = true;
+      } else if (T.kind === 'pass') {
+        if (!o.bonus) {
+          o.bonus = true; bonus += 25;
+          addPopup('SHADE +25', P(laneX(o.lane), 0, Math.max(0, o.z)).x, H * 0.72, C.deep, 0.9);
+        }
+      } else if (T.kind === 'boost') {
+        if (!o.used) {
+          o.used = true; boostT = 4; bonus += 30;
+          addPopup('SPEED UP!', P(laneX(o.lane), 0, Math.max(0, o.z)).x, H * 0.62, C.leaf, 1.0);
+        }
+      } else {
+        const okay = T.kind === 'jump' ? player.h >= T.clear
+                   : T.kind === 'roll' ? player.roll > 0
+                   : (player.h >= T.clear || player.roll > 0);
+        if (!okay) { die(REASON[o.type]); return; }
+        if (T.kind === 'jump' && player.h - T.clear < 14) o.tight = true;
+        if (T.kind === 'roll' && player.roll < 0.15) o.tight = true;
+        if (T.kind === 'both') {
+          if (player.h >= T.clear && player.h - T.clear < 14) o.tight = true;
+          if (player.roll > 0 && player.roll < 0.15) o.tight = true;
+        }
+      }
+    }
+
+    if (!o.done && o.z < -(T.half + PH)) {
+      o.done = true;
+      if (T.lethal && o.tight) { nearMiss(); if (state !== 'play') return; }
+    }
+  }
+
+  if (!player.onRamp && !player.airborne && player.h > 0) {
+    player.airborne = true; player.vh = 0;
+  }
+
+  for (const c of coins) {
+    c.z -= travel;
+    if (!c.got && c.lane === player.lane && Math.abs(c.z) < 0.35 && Math.abs(c.h - player.h) < 40) {
+      c.got = true; coinCount++; bonus += 10;
+    }
+  }
+  obstacles = obstacles.filter(o => o.z + (TYPES[o.type].half || 0) > -3);
+  coins = coins.filter(c => !c.got && c.z > -3);
+
+  if (time - lastNear > 2.5) bearD = Math.min(1, bearD + dt * 0.12);
+
+  popups.forEach(p => p.t += dt);
+  popups = popups.filter(p => p.t < p.life);
+}
+
+// ============ DRAW HELPERS ============
+function rr(x, y, w, h, r) {
+  if (w <= 0 || h <= 0) return;
+  r = Math.min(r, w / 2, h / 2);
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+function lg(x0, y0, x1, y1, stops) {
+  const g = ctx.createLinearGradient(x0, y0, x1, y1);
+  stops.forEach((s, i) => g.addColorStop(i / (stops.length - 1), s));
+  return g;
+}
+function rg(x, y, r, inner, outer) {
+  const g = ctx.createRadialGradient(x - r * 0.35, y - r * 0.4, r * 0.1, x, y, r);
+  g.addColorStop(0, inner); g.addColorStop(1, outer);
+  return g;
+}
+
+// ---- procedural fallbacks (used until a Gemini image exists for that object) ----
+function drawGrill(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.strokeStyle = '#2B2B2B'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-22, 8); ctx.lineTo(-26, 28); ctx.moveTo(22, 8); ctx.lineTo(26, 28); ctx.stroke();
+  ctx.fillStyle = '#3A3A3A'; rr(-30, -8, 60, 20, 6); ctx.fill();
+  ctx.fillStyle = '#262626'; rr(-32, -26, 64, 20, 9); ctx.fill();
+  ctx.restore();
+}
+function drawTent(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = C.green;
+  ctx.beginPath(); ctx.moveTo(-54, 0); ctx.bezierCurveTo(-62, -100, -30, -150, 0, -150);
+  ctx.bezierCurveTo(30, -150, 62, -100, 54, 0); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#1B3A1B';
+  ctx.beginPath(); ctx.moveTo(-28, 0); ctx.lineTo(-28, -42); ctx.quadraticCurveTo(0, -70, 28, -42); ctx.lineTo(28, 0); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawHammock(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = '#7A4B26'; ctx.fillRect(-50, -26, 8, 44); ctx.fillRect(42, -26, 8, 44);
+  ctx.fillStyle = C.cream;
+  ctx.beginPath(); ctx.moveTo(-44, -20); ctx.quadraticCurveTo(0, 22, 44, -20); ctx.quadraticCurveTo(0, 6, -44, -20); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function drawVan(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = C.white; rr(-42, -56, 84, 112, 14); ctx.fill();
+  ctx.fillStyle = C.green; ctx.fillRect(-42, 14, 84, 12);
+  ctx.restore();
+}
+function drawCanopy(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.strokeStyle = '#555'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(-46, -8); ctx.lineTo(-46, 34); ctx.moveTo(46, -8); ctx.lineTo(46, 34); ctx.stroke();
+  ctx.fillStyle = C.red; ctx.beginPath(); ctx.moveTo(-30, -30); ctx.lineTo(30, -30); ctx.lineTo(46, -8); ctx.lineTo(-46, -8); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+const FALLBACK = { grill:drawGrill, tent:drawTent, hammock:drawHammock, van:drawVan, canopy:drawCanopy };
+
+// ---- house obstacles (procedural with 3D-style shading until their images are generated) ----
+function drawTable(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = lg(0, -88, 0, 0, ['#8A5A33', '#5E3B1F']);
+  rr(-58, -88, 11, 88, 4); ctx.fill(); rr(47, -88, 11, 88, 4); ctx.fill();
+  ctx.fillStyle = lg(0, -104, 0, -84, ['#E25A4E', '#B8342B']); rr(-68, -104, 136, 22, 7); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.85)';
+  for (let i = -60; i <= 54; i += 20) ctx.fillRect(i, -104, 8, 22);
+  ctx.fillStyle = 'rgba(255,255,255,0.35)'; rr(-64, -103, 128, 5, 3); ctx.fill();
+  ctx.restore();
+}
+function drawChair(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = lg(0, -50, 0, 0, ['#8A5A33', '#5E3B1F']);
+  rr(-28, -50, 8, 50, 3); ctx.fill(); rr(20, -50, 8, 50, 3); ctx.fill();
+  rr(-30, -94, 8, 46, 3); ctx.fill(); rr(22, -94, 8, 46, 3); ctx.fill();
+  ctx.fillStyle = lg(0, -58, 0, -46, ['#D79A63', '#A8643A']); rr(-34, -58, 68, 13, 6); ctx.fill();
+  ctx.fillStyle = lg(0, -96, 0, -68, ['#C9885A', '#9A5A33']); rr(-30, -96, 60, 28, 8); ctx.fill();
+  ctx.restore();
+}
+function drawCounter(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = lg(0, -88, 0, 0, ['#F7EEDC', '#DCCBA9']); rr(-50, -88, 100, 88, 5); ctx.fill();
+  ctx.strokeStyle = '#C9B48E'; ctx.lineWidth = 2;
+  ctx.strokeRect(-43, -79, 39, 68); ctx.strokeRect(4, -79, 39, 68);
+  ctx.fillStyle = '#B79B6E'; rr(-12, -50, 8, 4, 2); ctx.fill(); rr(4, -50, 8, 4, 2); ctx.fill();
+  ctx.fillStyle = lg(0, -102, 0, -88, ['#C79A70', '#8D6E63']); rr(-53, -102, 106, 14, 4); ctx.fill();
+  ctx.restore();
+}
+function drawCat(x, y) {
+  const t = time * 6;
+  ctx.save(); ctx.translate(x, y);
+  ctx.strokeStyle = '#E8893C'; ctx.lineWidth = 8; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-26, -20); ctx.quadraticCurveTo(-48, -30, -42, -54 + Math.sin(t) * 3); ctx.stroke();
+  ctx.fillStyle = rg(0, -24, 34, '#FFB066', '#D9772C');
+  ctx.beginPath(); ctx.ellipse(0, -22, 30, 17, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(26, -38, 15, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(15, -46); ctx.lineTo(17, -61); ctx.lineTo(27, -50); ctx.closePath(); ctx.fill();
+  ctx.beginPath(); ctx.moveTo(31, -50); ctx.lineTo(39, -61); ctx.lineTo(41, -46); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#C8692A'; rr(-18, -10, 7, 10, 3); ctx.fill(); rr(12, -10, 7, 10, 3); ctx.fill();
+  ctx.fillStyle = '#2E7D32'; ctx.beginPath(); ctx.arc(32, -40, 2.6, 0, Math.PI * 2); ctx.fill();
+  ctx.restore();
+}
+function drawWagon(x, y) {
+  ctx.save(); ctx.translate(x, y);
+  ctx.fillStyle = 'rgba(198,214,44,0.45)';
+  ctx.beginPath(); ctx.ellipse(0, -6, 60, 15, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = lg(0, -66, 0, -24, ['#F1DEB8', '#CDB284']);
+  ctx.beginPath(); ctx.moveTo(-42, -66); ctx.lineTo(42, -66); ctx.lineTo(34, -24); ctx.lineTo(-34, -24); ctx.closePath(); ctx.fill();
+  ctx.strokeStyle = '#1B1B1B'; ctx.lineWidth = 5; ctx.lineCap = 'round';
+  ctx.beginPath(); ctx.moveTo(-42, -66); ctx.lineTo(-36, -22); ctx.moveTo(42, -66); ctx.lineTo(36, -22);
+  ctx.moveTo(-36, -70); ctx.lineTo(-42, -112); ctx.moveTo(36, -70); ctx.lineTo(42, -112);
+  ctx.moveTo(-42, -112); ctx.lineTo(42, -112); ctx.stroke();
+  for (const wx of [-30, 30]) {
+    ctx.fillStyle = rg(wx, -11, 12, '#444', '#0E0E0E');
+    ctx.beginPath(); ctx.arc(wx, -11, 11, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = '#888'; ctx.beginPath(); ctx.arc(wx, -11, 3, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+const HOUSE_DRAW = { table:drawTable, chair:drawChair, counter:drawCounter, cat:drawCat, wagon:drawWagon };
+
+// leaf coin with a spin
+function drawCoin(z) {
+  return () => {
+    const s = Math.max(0.22, Math.abs(Math.cos(time * 4 + z * 0.7)));
+    const ci = img('coin-leaf');
+    if (ci) {
+      ctx.save(); ctx.translate(0, -18); ctx.scale(s, 1);
+      ctx.drawImage(ci, -15, -15, 30, 30);
+      ctx.restore();
+      return;
+    }
+    ctx.save(); ctx.translate(0, -18); ctx.scale(s, 1);
+    ctx.fillStyle = rg(0, 0, 13, '#FFF2A8', '#E0A300');
+    ctx.beginPath(); ctx.arc(0, 0, 13, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#A66F00'; ctx.lineWidth = 2.5; ctx.stroke();
+    ctx.fillStyle = '#5DB043';
+    ctx.beginPath(); ctx.ellipse(0, 0, 5, 8, 0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = '#2E7D32'; ctx.lineWidth = 1.5;
+    ctx.beginPath(); ctx.moveTo(-3, 5); ctx.lineTo(3, -5); ctx.stroke();
+    ctx.restore();
+  };
+}
+
+function drawBear() {
+  const bi = img('bear-run-0' + (1 + Math.floor(time * 8) % 2));
+  if (bi) {
+    const h = 130, w = h * bi.naturalWidth / bi.naturalHeight;
+    ctx.drawImage(bi, -w / 2, -h, w, h);
+    return;
+  }
+  const swing = Math.sin(time * 16) * 6;
+  ctx.save();
+  const fur = rg(0, -30, 46, '#9A6440', '#5A341C');
+  ctx.fillStyle = fur;
+  ctx.beginPath(); ctx.ellipse(-30, -14 + swing, 9, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(30, -14 - swing, 9, 14, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.ellipse(0, -24, 32, 28, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-21, -54, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(21, -54, 10, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(0, -56, 24, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#D9A87A';
+  ctx.beginPath(); ctx.ellipse(0, -45, 12, 9, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = '#1E1E1E';
+  ctx.beginPath(); ctx.arc(0, -49, 4, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(-9, -62, 3.2, 0, Math.PI * 2); ctx.fill();
+  ctx.beginPath(); ctx.arc(9, -62, 3.2, 0, Math.PI * 2); ctx.fill();
+  if (bearD < 0.5) {
+    ctx.fillStyle = '#7A0E0E';
+    ctx.beginPath(); ctx.ellipse(0, -37, 8, 5 + (0.5 - bearD) * 10, 0, 0, Math.PI * 2); ctx.fill();
+  }
+  ctx.restore();
+}
+
+// ---- runner seen from behind: 3D-style shading matched to the Gemini camper ----
+function drawRunnerBack() {
+  const skin = '#E9B58E', skinD = '#C98E66';
+  if (player.roll > 0) {
+    ctx.save();
+    ctx.translate(0, -30);
+    ctx.rotate((time * 16) % (Math.PI * 2));
+    ctx.fillStyle = rg(0, 0, 30, '#6BBF4E', '#2D6A27');
+    ctx.beginPath(); ctx.arc(0, 0, 30, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = rg(0, 0, 30, '#C9C658', '#8E8B2C');
+    ctx.beginPath(); ctx.arc(0, 0, 30, -0.5, 0.5); ctx.lineTo(0, 0); ctx.closePath(); ctx.fill();
+    ctx.fillStyle = 'rgba(255,255,255,0.25)';
+    ctx.beginPath(); ctx.ellipse(-9, -12, 10, 6, -0.6, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+    return;
+  }
+  const t = time * 15;
+  const air = player.airborne, climb = player.climb;
+  const s = (air || climb) ? 0 : Math.sin(t);
+  const liftL = air ? 12 : climb ? (Math.sin(time * 18) > 0 ? 14 : 0) : Math.max(0, s) * 12;
+  const liftR = air ? 8  : climb ? (Math.sin(time * 18) > 0 ? 0 : 14) : Math.max(0, -s) * 12;
+  const bob = (air || climb) ? 0 : Math.abs(s) * -3;
+
+  ctx.save(); ctx.translate(0, bob);
+  // legs: calf + boot
+  for (const [lx, lift] of [[-10, liftL], [10, liftR]]) {
+    ctx.fillStyle = lg(lx - 6, 0, lx + 6, 0, [skin, skinD]);
+    rr(lx - 6, -40 - lift * 0.4, 12, 30 - lift * 0.6, 5); ctx.fill();
+    ctx.fillStyle = lg(0, -14 - lift, 0, -lift, ['#7A4F2E', '#45291A']);
+    rr(lx - 8, -14 - lift, 16, 14, 5); ctx.fill();
+    ctx.fillStyle = '#2B1A10'; rr(lx - 8, -4 - lift, 16, 4, 2); ctx.fill();
+  }
+  // shorts
+  ctx.fillStyle = lg(0, -58, 0, -36, ['#8E7D4C', '#655731']);
+  rr(-21, -60, 42, 24, 8); ctx.fill();
+  ctx.fillStyle = 'rgba(0,0,0,0.18)'; ctx.fillRect(-1, -52, 2, 16);
+  // arms (swing opposite to legs; raised when climbing or jumping)
+  const armY = climb ? -112 : air ? -98 : -64;
+  for (const [ax, sgn] of [[-22, 1], [22, -1]]) {
+    const swing = (air || climb) ? 0 : s * sgn * 8;
+    const hy = armY + swing + (climb && sgn > 0 ? (Math.sin(time * 18) > 0 ? -8 : 6) : 0);
+    ctx.strokeStyle = skinD; ctx.lineWidth = 10; ctx.lineCap = 'round';
+    ctx.beginPath(); ctx.moveTo(ax, -84); ctx.lineTo(ax + (ax < 0 ? -5 : 5), hy); ctx.stroke();
+    ctx.strokeStyle = skin; ctx.lineWidth = 7;
+    ctx.beginPath(); ctx.moveTo(ax, -84); ctx.lineTo(ax + (ax < 0 ? -5 : 5), hy); ctx.stroke();
+  }
+  // shirt
+  ctx.fillStyle = lg(-22, 0, 22, 0, ['#4FA54A', '#2F7A2F']);
+  rr(-23, -94, 46, 38, 12); ctx.fill();
+  // backpack
+  ctx.fillStyle = lg(-18, -98, 18, -50, ['#617848', '#2F3E24']);
+  rr(-19, -98, 38, 46, 11); ctx.fill();
+  ctx.fillStyle = lg(0, -100, 0, -86, ['#6E8752', '#3A4B2B']);
+  rr(-17, -102, 34, 15, 8); ctx.fill();
+  ctx.fillStyle = lg(0, -76, 0, -56, ['#55693E', '#2A381F']);
+  rr(-13, -74, 26, 19, 6); ctx.fill();
+  ctx.fillStyle = '#C9B98A'; rr(-3, -96, 6, 6, 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.12)'; rr(-15, -97, 12, 30, 6); ctx.fill();
+  // head: hair from behind + ears
+  ctx.fillStyle = skin;
+  ctx.beginPath(); ctx.arc(-13, -110, 3.5, 0, Math.PI * 2); ctx.arc(13, -110, 3.5, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = rg(0, -112, 14, '#4A3B30', '#1C1612');
+  ctx.beginPath(); ctx.arc(0, -112, 13, 0, Math.PI * 2); ctx.fill();
+  // bucket hat
+  ctx.fillStyle = lg(0, -124, 0, -114, ['#BDBA4C', '#8C8A2E']);
+  ctx.beginPath(); ctx.ellipse(0, -118, 22, 7, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = lg(-12, 0, 12, 0, ['#C8C556', '#9C9A35']);
+  rr(-13, -134, 26, 17, 8); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.22)'; rr(-9, -132, 8, 6, 3); ctx.fill();
+  ctx.restore();
+}
+
+// ============ 3D BOXES: camper van and kitchen counter you run across ============
+function drawBox(o) {
+  const T = TYPES[o.type];
+  const xc = laneX(o.lane), hw = T.hw, top = T.topH * PX2W;
+  const zr = o.z - T.half, zf = o.z + T.half;
+  const nearZ = -CAM_BACK + 0.45;
+  if (zf < nearZ) return;
+  const zn = Math.max(zr, nearZ);
+  const haze = fogAt(o.z);
+  const hazeFill = (pts) => { if (haze > 0) { ctx.globalAlpha = haze; poly(pts, fogCol); ctx.globalAlpha = 1; } };
+
+  // contact shadow under the whole length
+  ctx.fillStyle = 'rgba(20,35,10,0.25)';
+  poly([P(xc - hw - 0.03, 0, zn), P(xc + hw + 0.03, 0, zn), P(xc + hw + 0.03, 0, zf + 0.1), P(xc - hw - 0.03, 0, zf + 0.1)], 'rgba(20,35,10,0.25)');
+
+  // visible side wall (camera sits at x = 0)
+  const side = xc > 0.05 ? -1 : (xc < -0.05 ? 1 : 0);
+  if (side) {
+    const xs = xc + side * hw;
+    const q = (y0, y1) => [P(xs, y0, zn), P(xs, y0, zf), P(xs, y1, zf), P(xs, y1, zn)];
+    const wall = q(0, top);
+    poly(wall, T.wall);
+    poly(q(0, top * 0.16), T.skirt);
+    poly(q(top * T.band[0], top * T.band[1]), T.stripe);
+    // soft vertical shading toward the far end
+    const a = P(xs, top / 2, zn), b = P(xs, top / 2, zf);
+    ctx.save(); poly(wall); ctx.clip();
+    ctx.fillStyle = lg(a.x, a.y, b.x, b.y, ['rgba(0,0,0,0)', 'rgba(0,0,0,0.14)']);
+    ctx.fillRect(0, 0, W, H); ctx.restore();
+    if (T.wheels) {
+      for (const wz of [zr + 0.55, zf - 0.6]) {
+        if (wz < nearZ) continue;
+        const pc = P(xs, 0.07, wz), r = F * 0.075 / pc.d;
+        ctx.fillStyle = '#1D1D1D';
+        ctx.beginPath(); ctx.ellipse(pc.x, pc.y, r * 0.45, r, 0, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#777';
+        ctx.beginPath(); ctx.ellipse(pc.x, pc.y, r * 0.2, r * 0.45, 0, 0, Math.PI * 2); ctx.fill();
+      }
+      // side window
+      const wz0 = zr + 1.1, wz1 = zr + 2.1;
+      if (wz1 > nearZ) {
+        poly([P(xs, top * 0.66, Math.max(wz0, nearZ)), P(xs, top * 0.66, wz1), P(xs, top * 0.9, wz1), P(xs, top * 0.9, Math.max(wz0, nearZ))], '#4B5A63');
+      }
+    }
+    hazeFill(wall);
+  }
+  // roof / counter top
+  const roof = [P(xc - hw, top, zn), P(xc + hw, top, zn), P(xc + hw, top, zf), P(xc - hw, top, zf)];
+  poly(roof, T.roof, 'rgba(0,0,0,0.15)');
+  if (o.type === 'van') {
+    // rack rails along the roof
+    for (const rx of [-0.75, 0.75]) {
+      const r0 = P(xc + hw * rx, top + 0.05, Math.max(zr + 0.1, nearZ)), r1 = P(xc + hw * rx, top + 0.05, zf - 0.2);
+      ctx.strokeStyle = '#5E6B5E'; ctx.lineWidth = Math.max(1, 4 * r0.k);
+      ctx.beginPath(); ctx.moveTo(r0.x, r0.y); ctx.lineTo(r1.x, r1.y); ctx.stroke();
+    }
+  }
+  hazeFill(roof);
+  // near face: the generated image for the van, procedural for the counter
+  if (zr > nearZ) {
+    const fn = (o.type === 'van' || laneImage(o.type, o.lane)) ? painter(o.type, o.lane) : drawCounter;
+    sprite(xc, zr, fn, baseOf(o.type, o.lane));
+  }
+}
+
+// ============ WORLD ============
+function drawBG(name, zoom, alpha) {
+  const b = BGS[name], im = IMG[b.key];
+  if (!ok(im)) return false;
+  const iw = im.naturalWidth, ih = im.naturalHeight;
+  const S = Math.max(HOR / b.vy, (H - HOR) / (1 - b.vy), H, W * ih / iw) * zoom;
+  const Wd = S * iw / ih;
+  ctx.globalAlpha = alpha;
+  ctx.drawImage(im, W / 2 - b.vx * Wd, HOR - b.vy * S, Wd, S);
+  ctx.globalAlpha = 1;
+  return true;
+}
+function drawFallbackSky() {
+  const g = lg(0, 0, 0, HOR, ['#7FD3F7', '#E9FAFF']);
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, HOR + 2);
+  ctx.fillStyle = '#6DBE45'; ctx.fillRect(0, HOR, W, H - HOR);
+}
+
+// returns { facadeOn, doorDist } so obstacles past the door can be hidden
+function drawBackdrop(sd) {
+  const si = stageIndexAt(sd);
+  const cur = STAGES[si].id, nxt = STAGES[(si + 1) % STAGES.length].id;
+  const m = ((sd % CYCLE) + CYCLE) % CYCLE;
+  const rem = BOUNDS[si] - m;
+  fogCol = BGS[cur].fog;
+  let res = { facadeOn:false, doorAt:0 };
+  if (state === 'play' && cur !== nxt && nxt === 'house' && rem < HOUSE_APPROACH) {
+    if (!drawBG(cur, 1, 1)) drawFallbackSky();
+    const fa = clamp((HOUSE_APPROACH - rem) / 14, 0, 1);
+    const zf = 1 + 3.6 * Math.pow(clamp((HOUSE_APPROACH - 14 - rem) / (HOUSE_APPROACH - 14), 0, 1), 2.4);
+    drawBG('facade', zf, fa);
+    if (fa > 0.5) fogCol = BGS.facade.fog;
+    res = { facadeOn: fa > 0.05, doorAt: rem };
+  } else if (state === 'play' && cur !== nxt && rem < 30) {
+    const z = 1 + 0.55 * Math.pow((30 - rem) / 30, 2);
+    if (!drawBG(cur, z, 1)) drawFallbackSky();
+  } else {
+    if (!drawBG(cur, 1, 1)) drawFallbackSky();
+  }
+  // light flash right at the doorway / transition
+  if (state === 'play' && cur !== nxt && rem < 4) {
+    ctx.globalAlpha = (4 - rem) / 4;
+    ctx.fillStyle = nxt === 'house' ? '#FFE7A8' : '#FFFFFF';
+    ctx.fillRect(0, 0, W, H);
+    ctx.globalAlpha = 1;
+  }
+  return res;
+}
+
+// tiny deterministic hash for scattering road details
+function hash(n) { const s = Math.sin(n * 127.1 + 311.7) * 43758.5453; return s - Math.floor(s); }
+
+function groundEllipse(xw, z, rx, rz, fill) {
+  const c = P(xw, 0, z);
+  if (c.d < 0.4) return;
+  const a = P(xw, 0, z - rz), b = P(xw, 0, z + rz);
+  const ry = Math.max(0.5, (a.y - b.y) / 2);
+  ctx.fillStyle = fill;
+  ctx.beginPath(); ctx.ellipse(c.x, (a.y + b.y) / 2, F * rx / c.d, ry, 0, 0, Math.PI * 2); ctx.fill();
+}
+
+function drawRoad(id, sd) {
+  const RD = ROAD_HALF, zNear = -1.4;
+  const road = [P(-RD, 0, zNear), P(-RD, 0, VIEW_FAR), P(RD, 0, VIEW_FAR), P(RD, 0, zNear)];
+  const DETAIL = 70;
+  ctx.save();
+  poly(road); ctx.clip();
+
+  if (id === 'outdoor') {
+    poly(road, '#C99E69');
+    for (let k = -1; k < DETAIL / 4; k++) {
+      const z0 = k * 4 - (sd % 4);
+      poly([P(-RD, 0, z0), P(RD, 0, z0), P(RD, 0, z0 + 0.6), P(-RD, 0, z0 + 0.6)], 'rgba(150,105,60,0.05)');
+      poly([P(-RD, 0, z0 + 0.6), P(RD, 0, z0 + 0.6), P(RD, 0, z0 + 2.0), P(-RD, 0, z0 + 2.0)], 'rgba(150,105,60,0.08)');
+      poly([P(-RD, 0, z0 + 2.0), P(RD, 0, z0 + 2.0), P(RD, 0, z0 + 2.6), P(-RD, 0, z0 + 2.6)], 'rgba(150,105,60,0.05)');
+    }
+    // wheel ruts in each lane
+    for (let l = 0; l < 3; l++) for (const off of [-0.11, 0.11]) {
+      const x = laneX(l) + off;
+      poly([P(x - 0.025, 0, zNear), P(x - 0.025, 0, VIEW_FAR), P(x + 0.025, 0, VIEW_FAR), P(x + 0.025, 0, zNear)], 'rgba(120,80,45,0.18)');
+    }
+    // pebbles
+    const step = 0.9, base = Math.floor(sd / step);
+    for (let n = Math.floor(DETAIL / step); n >= -2; n--) {
+      const idx = base + n, z = idx * step - sd;
+      if (z < zNear) continue;
+      for (let j = 0; j < 2; j++) {
+        const hx = hash(idx * 3 + j), hs = hash(idx * 7 + j * 13);
+        groundEllipse(-RD + 0.05 + hx * (2 * RD - 0.1), z, 0.018 + hs * 0.02, 0.012 + hs * 0.012, j ? '#A47F57' : '#E2C79E');
+      }
+    }
+    // grassy verges blending into the backdrop
+    for (const sx of [-1, 1]) {
+      poly([P(sx * RD, 0, zNear), P(sx * RD, 0, VIEW_FAR), P(sx * (RD - 0.06), 0, VIEW_FAR), P(sx * (RD - 0.06), 0, zNear)], '#7EB64F');
+      poly([P(sx * (RD - 0.06), 0, zNear), P(sx * (RD - 0.06), 0, VIEW_FAR), P(sx * (RD - 0.09), 0, VIEW_FAR), P(sx * (RD - 0.09), 0, zNear)], 'rgba(90,60,30,0.25)');
+    }
+  } else if (id === 'house') {
+    poly(road, '#4F8E36');
+    // plank seams along the run, and staggered plank ends that scroll
+    const PW = 0.165;
+    for (let x = -RD; x <= RD + 0.001; x += PW) {
+      poly([P(x - 0.006, 0, zNear), P(x - 0.006, 0, VIEW_FAR), P(x + 0.006, 0, VIEW_FAR), P(x + 0.006, 0, zNear)], 'rgba(25,55,18,0.45)');
+    }
+    let col = 0;
+    for (let x = -RD; x < RD - 0.01; x += PW, col++) {
+      const shade = col % 2 ? 'rgba(255,255,255,0.05)' : 'rgba(0,0,0,0.05)';
+      poly([P(x, 0, zNear), P(x, 0, VIEW_FAR), P(x + PW, 0, VIEW_FAR), P(x + PW, 0, zNear)], shade);
+      const len = 2.2, ofs = (col * 0.83) % len;
+      for (let k = -1; k < DETAIL / len; k++) {
+        const z = k * len + ofs - (sd % len);
+        if (z < zNear) continue;
+        poly([P(x, 0, z), P(x + PW, 0, z), P(x + PW, 0, z + 0.05), P(x, 0, z + 0.05)], 'rgba(25,55,18,0.5)');
+      }
+    }
+    // red runner rugs down the middle lane
+    const RL = 9, RG = 4;
+    for (let k = -1; k < DETAIL / (RL + RG); k++) {
+      const z0 = k * (RL + RG) - (sd % (RL + RG));
+      const z1 = z0 + RL;
+      if (z1 < zNear) continue;
+      poly([P(-0.25, 0, z0), P(0.25, 0, z0), P(0.25, 0, z1), P(-0.25, 0, z1)], '#D8463C');
+      poly([P(-0.2, 0, z0 + 0.12), P(0.2, 0, z0 + 0.12), P(0.2, 0, z1 - 0.12), P(-0.2, 0, z1 - 0.12)], '#C23A31');
+      poly([P(-0.25, 0, z0), P(0.25, 0, z0), P(0.25, 0, z0 + 0.05), P(-0.25, 0, z0 + 0.05)], '#F2E2C2');
+    }
+    for (const sx of [-1, 1]) {
+      poly([P(sx * RD, 0, zNear), P(sx * RD, 0, VIEW_FAR), P(sx * (RD - 0.04), 0, VIEW_FAR), P(sx * (RD - 0.04), 0, zNear)], '#E9DCC0');
+    }
+  } else { // backyard
+    poly(road, '#4E9C3B');
+    // irregular stepping stones, staggered between lanes like the backdrop's patio path
+    const step = 1.25, base = Math.floor(sd / step);
+    for (let n = Math.floor(DETAIL / step); n >= -2; n--) {
+      const idx = base + n, z = idx * step - sd;
+      if (z < zNear) continue;
+      const cols = (idx % 2) ? [-0.42, 0, 0.42] : [-0.21, 0.21, 0.55, -0.55];
+      cols.forEach((cx, j) => {
+        const hx = hash(idx * 5 + j) - 0.5, hs = hash(idx * 11 + j * 3), hz = hash(idx * 17 + j);
+        if (hs > 0.9) return;                                  // a few gaps
+        const x = cx + hx * 0.06, zz = z + (hz - 0.5) * 0.3;
+        const rx = 0.12 + hs * 0.05, rz = 0.36 + hz * 0.16;
+        groundEllipse(x, zz - 0.05, rx + 0.012, rz, 'rgba(25,60,20,0.35)');
+        groundEllipse(x, zz, rx, rz, hs > 0.75 ? '#D9D1B8' : '#ECE4CC');
+        groundEllipse(x - rx * 0.25, zz + rz * 0.2, rx * 0.5, rz * 0.35, 'rgba(255,255,255,0.18)');
+      });
+    }
+    for (const sx of [-1, 1]) {
+      poly([P(sx * RD, 0, zNear), P(sx * RD, 0, VIEW_FAR), P(sx * (RD - 0.05), 0, VIEW_FAR), P(sx * (RD - 0.05), 0, zNear)], '#3C7F31');
+    }
+  }
+  // subtle lane dividers
+  ctx.globalAlpha = 0.18;
+  for (const xw of [-LANE_W / 2, LANE_W / 2]) {
+    poly([P(xw - 0.008, 0, zNear), P(xw - 0.008, 0, VIEW_FAR), P(xw + 0.008, 0, VIEW_FAR), P(xw + 0.008, 0, zNear)], '#FFFFFF');
+  }
+  ctx.globalAlpha = 1;
+  // distance haze so the road melts into the backdrop's horizon
+  const fg = ctx.createLinearGradient(0, HOR, 0, HOR + 140);
+  fg.addColorStop(0, fogCol); fg.addColorStop(0.35, fogCol + 'AA'); fg.addColorStop(1, fogCol + '00');
+  ctx.fillStyle = fg; ctx.fillRect(0, HOR - 2, W, 142);
+  ctx.restore();
+}
+
+function groundShadow(o) {
+  const T = TYPES[o.type];
+  if (!T.shadow || o.z < -1.5) return;
+  const p = P(laneX(o.lane), 0, o.z);
+  if (p.d < 0.4) return;
+  groundEllipse(laneX(o.lane), o.z, T.shadow * PX2W, Math.max(0.12, T.half * 0.9), 'rgba(25,40,15,' + (0.3 * (1 - fogAt(o.z))).toFixed(3) + ')');
+}
+
+function drawPlayer() {
+  const pp = P(player.xw, 0, 0);
+  const sh = Math.max(0.35, 1 - (player.airborne ? player.h : 0) / 170);
+  const shadowY = pp.y - (player.onRamp || (!player.airborne && player.h > 0) ? player.h : 0) + 3;
+  ctx.fillStyle = 'rgba(0,0,0,.28)';
+  ctx.beginPath(); ctx.ellipse(pp.x, shadowY, 30 * sh, 9 * sh, 0, 0, Math.PI * 2); ctx.fill();
+  ctx.save();
+  ctx.translate(pp.x, pp.y - player.h);
+  const ri = runnerImage();
+  if (ri) {
+    // one scale for the whole pose sheet, so poses keep their true relative size
+    const ref = img(`runner-${LANE_NAME[player.lane]}-lane-run-01`) || img('runner-mid-lane-run-01') || ri;
+    const h = ri.naturalHeight * 118 / ref.naturalHeight, w = h * ri.naturalWidth / ri.naturalHeight;
+    ctx.drawImage(ri, -w / 2, -h, w, h);
+  } else {
+    ctx.scale(0.86, 0.86);
+    drawRunnerBack();
+  }
+  ctx.restore();
+}
+
+// runner-<lane>-lane-<action>; falls back to the middle-lane set, then to the drawn runner
+function runnerImage() {
+  let action;
+  if (player.roll > 0) action = 'roll';
+  else if (player.climb) action = Math.sin(time * 18) > 0 ? 'climb-01' : 'climb-02';
+  else if (player.airborne) action = 'jump';
+  else action = 'run-0' + (1 + Math.floor(time * 10) % 4);
+  if (state === 'title') action = 'run-01';
+  return img(`runner-${LANE_NAME[player.lane]}-lane-${action}`) || img(`runner-mid-lane-${action}`);
+}
+
+function drawSpeedLines() {
+  const strength = boostT > 0 ? 0.5 : clamp((speed - 9) / 8, 0, 0.3);
+  if (strength <= 0) return;
+  ctx.strokeStyle = 'rgba(255,255,255,' + strength.toFixed(2) + ')';
+  ctx.lineWidth = 2;
+  for (let i = 0; i < 14; i++) {
+    const a = hash(i * 9.1) * Math.PI * 2;
+    const ph = (time * 2.4 + hash(i)) % 1;
+    const r0 = 140 + ph * 260, r1 = r0 + 40 + ph * 50;
+    const cx = W / 2, cy = HOR;
+    const x0 = cx + Math.cos(a) * r0, y0 = cy + Math.sin(a) * r0 * 0.9;
+    if (Math.abs(x0 - cx) < 120 && y0 > HOR) continue;
+    ctx.beginPath(); ctx.moveTo(x0, y0);
+    ctx.lineTo(cx + Math.cos(a) * r1, cy + Math.sin(a) * r1 * 0.9); ctx.stroke();
+  }
+}
+
+function drawHUD() {
+  ctx.fillStyle = 'rgba(0,0,0,.38)'; rr(10, 10, W - 20, 50, 14); ctx.fill();
+  ctx.font = 'bold 20px Arial';
+  ctx.textAlign = 'left';   ctx.fillStyle = '#fff'; ctx.fillText(`${Math.floor(dist)} m`, 22, 42);
+  ctx.textAlign = 'center'; ctx.fillStyle = '#FFE27A'; ctx.fillText(`● ${coinCount}`, W / 2, 42);
+  ctx.textAlign = 'right';  ctx.fillStyle = '#fff'; ctx.fillText(`${score()}`, W - 22, 42);
+  if (bearD < 1 || time - lastNear < 2.5) {
+    ctx.fillStyle = 'rgba(0,0,0,.38)'; rr(10, 66, 170, 22, 8); ctx.fill();
+    ctx.fillStyle = '#fff'; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'left';
+    ctx.fillText('BEAR', 18, 81);
+    ctx.fillStyle = '#444'; rr(64, 72, 108, 8, 4); ctx.fill();
+    ctx.fillStyle = bearD < 0.35 ? C.red : C.leaf; rr(64, 72, 108 * bearD, 8, 4); ctx.fill();
+  }
+  if (boostT > 0) {
+    ctx.fillStyle = 'rgba(0,0,0,.38)'; rr(W - 140, 66, 130, 22, 8); ctx.fill();
+    ctx.fillStyle = C.leaf; ctx.font = 'bold 11px Arial'; ctx.textAlign = 'center';
+    ctx.fillText(`SPEED BOOST ${boostT.toFixed(1)}s`, W - 75, 81);
+  }
+}
+
+function drawObstacle(o) {
+  const T = TYPES[o.type];
+  if (T.kind === 'ramp') { drawBox(o); return; }
+  sprite(laneX(o.lane), o.z, painter(o.type, o.lane), baseOf(o.type, o.lane));
+}
+
+// ============ SCROLLING TILE WORLD ============
+function stageInfo(wz) {
+  const si = stageIndexAt(wz);
+  const end = Math.floor(wz / CYCLE) * CYCLE + BOUNDS[si];
+  return { si, id: STAGES[si].id, start: end - STAGES[si].len, end };
+}
+const wrap = (n, len) => ((n % len) + len) % len;
+
+// far sky / mountains: the only layer that stays (almost) still, with a little parallax
+function drawHorizon(id, alpha) {
+  if (alpha <= 0) return;
+  const hid = id === 'house' ? 'backyard' : id;    // what you see past the end of the hallway
+  const t = THEME[hid], im = img(t.horizon);
+  ctx.globalAlpha = alpha;
+  if (im) {
+    const iw = im.naturalWidth, ih = im.naturalHeight;
+    const S = Math.max(HOR / t.horizonY, (W + 40) * ih / iw);
+    const Wd = S * iw / ih;
+    ctx.drawImage(im, W / 2 - Wd / 2 - player.xw * 30, HOR - t.horizonY * S, Wd, S);
+  } else {
+    ctx.fillStyle = lg(0, 0, 0, HOR, t.sky); ctx.fillRect(0, 0, W, HOR + 1);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// ground: each screen row below the horizon samples one row of the looping top-down tiles
+// which tile image and how far along it (0..1) a world position falls
+function groundAt(wz) {
+  const info = stageInfo(wz), th = THEME[info.id];
+  const local = wz - info.start;
+  const tl = tilesOf(th.tiles), enter = th.enter ? img(th.enter) : null;
+  if (enter && local < TILE_L) return { im: enter, v: local / TILE_L, th, key: -1 };
+  if (!tl.length) return { im: null, v: 0, th, key: -2 };
+  const L = enter ? local - TILE_L : local, n = Math.floor(L / TILE_L);
+  return { im: tl[wrap(n, tl.length)], v: L / TILE_L - n, th, key: n };
+}
+
+// ground: thin screen strips, each sampling the matching rows of the looping top-down tiles
+function drawGroundTiles(sd, stopWZ) {
+  ctx.fillStyle = THEME[stageInfo(sd).id].side;
+  ctx.fillRect(0, HOR, W, H - HOR);
+  let y = Math.floor(HOR) + 1;
+  while (y < H) {
+    const sh = y < HOR + 30 ? 1 : y < HOR + 110 ? 2 : 3;          // strip height in px
+    const dTop = F * CAM_H / (y - HOR), dBot = F * CAM_H / (y + sh - HOR);
+    const wzTop = dTop - CAM_BACK + sd, wzBot = dBot - CAM_BACK + sd;
+    const d = (dTop + dBot) / 2;
+    if (stopWZ !== null && wzBot > stopWZ) { y += sh; continue; }
+    const g0 = groundAt(wzBot), g1 = groundAt(wzTop);
+    const g = g0;
+    if (g.im) {
+      const iw = g.im.naturalWidth, ih = g.im.naturalHeight;
+      const syB = (1 - g.v) * ih;
+      const syT = (g1.im === g.im && g1.key === g.key) ? (1 - g1.v) * ih : syB - 1;
+      const sy = clamp(Math.min(syT, syB), 0, ih - 1), sH = clamp(Math.abs(syB - syT), 1, ih - sy);
+      const half = F * (TILE_W / 2) / d, x0 = W / 2 - half, wpx = half * 2;
+      ctx.drawImage(g.im, 0, sy, iw, sH, x0, y, wpx, sh + 0.06);
+      if (y > HOR + 12) {   // near the horizon the haze hides the sides anyway
+        const band = Math.max(x0, 0), sb = iw * 0.25;
+        if (x0 > 0) {
+          ctx.drawImage(g.im, 0, sy, sb, sH, 0, y, band, sh + 0.06);
+          ctx.drawImage(g.im, iw - sb, sy, sb, sH, x0 + wpx, y, band, sh + 0.06);
+        }
+      }
+    } else {
+      ctx.fillStyle = g.th.side; ctx.fillRect(0, y, W, sh + 0.06);
+    }
+    y += sh;
+  }
+}
+
+// walls and fences: each screen column samples one column of the looping side-view tiles
+function drawWallTiles(sd, stopWZ) {
+  for (const id of ['house', 'backyard']) {
+    const th = THEME[id];
+    for (const side of [-1, 1]) {
+      const tl = wallsOf(th.walls, side < 0 ? 'left' : 'right');
+      if (!tl.length) continue;
+      for (let x = 0; x < W / 2; x += 2) {
+        const sx = side < 0 ? x : W - 2 - x;
+        const d = F * th.wallX / (W / 2 - (x + 1));
+        const z = d - CAM_BACK, wz = z + sd;
+        if (stopWZ !== null && wz > stopWZ) continue;
+        const info = stageInfo(wz);
+        if (info.id !== id) continue;
+        const local = wz - info.start, n = Math.floor(local / th.wallL);
+        const im = tl[wrap(n, tl.length)], u = local / th.wallL - n;
+        const iw = im.naturalWidth, ih = im.naturalHeight;
+        const col = clamp((side < 0 ? u : 1 - u) * iw, 0, iw - 1);
+        const top = HOR + F * (CAM_H - th.wallH) / d, bot = HOR + F * CAM_H / d;
+        ctx.drawImage(im, col, 0, 1, ih, sx, top, 2.05, bot - top);
+      }
+    }
+  }
+}
+// haze toward the far end of a hallway or yard (one gradient instead of per-column fog)
+function drawCenterHaze() {
+  const g = ctx.createRadialGradient(W / 2, HOR, 4, W / 2, HOR, 150);
+  g.addColorStop(0, fogCol); g.addColorStop(0.35, fogCol + 'AA'); g.addColorStop(1, fogCol + '00');
+  ctx.fillStyle = g; ctx.fillRect(W / 2 - 150, HOR - 150, 300, 300);
+}
+
+// hallway ceiling with scrolling light panels
+function drawCeiling(sd, stopWZ) {
+  const th = THEME.house;
+  for (let y = 0; y < HOR - 1; y += 2) {
+    const d = F * (th.wallH - CAM_H) / (HOR - y - 1);
+    const wz = d - CAM_BACK + sd;
+    if (stopWZ !== null && wz > stopWZ) continue;
+    if (stageInfo(wz).id !== 'house') continue;
+    const half = F * th.wallX / d;
+    const m = wrap(wz, 3.2);
+    ctx.fillStyle = m < 0.45 ? th.ceiling[2] : (m < 1.6 ? th.ceiling[0] : th.ceiling[1]);
+    ctx.fillRect(W / 2 - half, y, half * 2, 2.05);
+  }
+}
+
+// trees, bushes and lamps beside the path, placed on a fixed world grid so they scroll past
+function collectProps(sd) {
+  const out = [];
+  const G = 2.3;
+  for (const side of [-1, 1]) {
+    const sname = side < 0 ? 'left' : 'right';
+    for (let n = Math.floor((sd - 4) / G); n <= Math.floor((sd + 48) / G); n++) {
+      for (let row = 0; row < 2; row++) {
+        const h1 = hash(n * 7.13 + side * 3.1 + row * 17), h2 = hash(n * 3.7 + side + row * 5), h3 = hash(n * 1.9 - side * 5 + row * 11);
+        if (row === 1 && h1 < 0.45) continue;
+        const wz = n * G + h1 * G * 0.7;
+        const info = stageInfo(wz), th = THEME[info.id];
+        if (!th.props || !th.props.length) continue;
+        if (wz - info.start < 2.5 || info.end - wz < 3) continue;   // keep stage changes clear
+        const type = th.props[Math.floor(h2 * th.props.length)];
+        const im = img(`prop-${sname}-${type}`);
+        if (!im) continue;
+        const x = side * (th.propX[0] + row * 1.1 + h3 * (th.propX[1] - th.propX[0]) * 0.5);
+        const behind = th.walls && Math.abs(x) > th.wallX;
+        out.push({ z: wz - sd, prop: { im, x, h: (PROP_H[type] || 150) * (0.85 + h3 * 0.3), behind } });
+      }
+    }
+  }
+  return out;
+}
+// props are drawn straight to the screen from pre-hazed copies (4 haze levels per image, per stage colour)
+const hazeCache = new Map();
+function hazed(im, level) {
+  if (level === 0) return im;
+  const key = im.src.length + ':' + im.src.slice(-40) + ':' + level + ':' + fogCol;
+  let c = hazeCache.get(key);
+  if (!c) {
+    const s = Math.min(1, 360 / im.naturalHeight);
+    c = document.createElement('canvas');
+    c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
+    const x = c.getContext('2d');
+    x.drawImage(im, 0, 0, c.width, c.height);
+    x.globalCompositeOperation = 'source-atop'; x.globalAlpha = level * 0.2; x.fillStyle = fogCol;
+    x.fillRect(0, 0, c.width, c.height);
+    hazeCache.set(key, c);
+  }
+  return c;
+}
+function drawProp(it) {
+  const { im, x, h } = it.prop;
+  const p = P(x, 0, it.z);
+  if (p.d < 0.4) return;
+  const lvl = Math.min(3, Math.round(fogAt(it.z) / 0.2));
+  const src = hazed(im, lvl);
+  const hh = h * p.k, ww = hh * im.naturalWidth / im.naturalHeight;
+  ctx.drawImage(src, p.x - ww / 2, p.y - hh, ww, hh);
+}
+
+function drawTileWorld(sd) {
+  const si = stageIndexAt(sd);
+  const cur = STAGES[si].id, nxt = STAGES[(si + 1) % STAGES.length].id;
+  const rem = BOUNDS[si] - wrap(sd, CYCLE);
+  fogCol = BGS[cur].fog;
+  ctx.fillStyle = fogCol; ctx.fillRect(0, 0, W, H);
+
+  drawHorizon(cur, 1);
+  const nextHz = nxt === 'house' ? null : nxt;
+  if (nextHz && nextHz !== cur && rem < 25) drawHorizon(nextHz, (25 - rem) / 25);
+
+  let stopWZ = null, res = { facadeOn:false, doorAt:0 };
+  if (state === 'play' && cur !== nxt && nxt === 'house' && rem < HOUSE_APPROACH) {
+    const fa = clamp((HOUSE_APPROACH - rem) / 14, 0, 1);
+    const zf = 1 + 3.6 * Math.pow(clamp((HOUSE_APPROACH - 14 - rem) / (HOUSE_APPROACH - 14), 0, 1), 2.4);
+    drawBG('facade', zf, fa);
+    stopWZ = sd + rem;
+    res = { facadeOn: fa > 0.05, doorAt: rem };
+  }
+  if (cur === 'house' || nxt === 'house') drawCeiling(sd, stopWZ);
+
+  const props = collectProps(sd).filter(p => !res.facadeOn || p.z < res.doorAt);
+  props.filter(p => p.prop.behind).sort((a, b) => b.z - a.z).forEach(drawProp);
+
+  drawGroundTiles(sd, stopWZ);
+
+  // haze where the ground meets the horizon
+  const fg = ctx.createLinearGradient(0, HOR - 30, 0, HOR + 130);
+  fg.addColorStop(0, fogCol + '00'); fg.addColorStop(0.2, fogCol + 'CC'); fg.addColorStop(0.45, fogCol + '66'); fg.addColorStop(1, fogCol + '00');
+  ctx.fillStyle = fg; ctx.fillRect(0, HOR - 30, W, 160);
+
+  drawWallTiles(sd, stopWZ);
+  if (cur === 'house') drawCenterHaze();
+
+  if (state === 'play' && cur !== nxt && nxt === 'house' && rem < 4) {
+    ctx.globalAlpha = (4 - rem) / 4; ctx.fillStyle = '#FFE7A8'; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
+  }
+  res.props = props.filter(p => !p.prop.behind);
+  return res;
+}
+
+function render() {
+  mainCtx.setTransform(DPR, 0, 0, DPR, 0, 0);
+  ctx = mainCtx;
+  ctx.clearRect(0, 0, W, H);
+  const sd = state === 'title' ? idleDist : dist;
+  const sid = STAGES[stageIndexAt(sd)].id;
+
+  let bd;
+  if (tileMode(sid)) bd = drawTileWorld(sd);
+  else { bd = drawBackdrop(sd); drawRoad(sid, sd); bd.props = []; }
+
+  const hidden = z => bd.facadeOn && z > bd.doorAt - 0.5;   // things beyond the front door stay hidden
+  const items = bd.props.slice();
+  for (const o of obstacles) if (!hidden(o.z - TYPES[o.type].half)) items.push({ z: o.z, o });
+  for (const c of coins) if (!c.got && c.z > -0.8 && !hidden(c.z)) items.push({ z: c.z, c });
+  items.sort((a, b) => b.z - a.z);
+  for (const it of items) if (it.o) groundShadow(it.o);
+
+  const drawItem = it => {
+    if (it.prop) drawProp(it);
+    else if (it.o) drawObstacle(it.o);
+    else sprite(laneX(it.c.lane), it.c.z, drawCoin(it.c.z), 0, it.c.h);
+  };
+  // far things, then the runner, then anything already passed (closer to the camera)
+  for (const it of items) if (it.z >= -0.2 || (it.o && TYPES[it.o.type].kind === 'ramp')) drawItem(it);
+  if (bearD < 1 || time - lastNear < 2.5) sprite(player.xw, -0.6 - bearD * 1.1, drawBear, 4);
+  drawPlayer();
+  for (const it of items) if (it.z < -0.2 && !(it.o && TYPES[it.o.type].kind === 'ramp')) drawItem(it);
+
+  if (state === 'play') { drawSpeedLines(); drawHUD(); }
+
+  for (const p of popups) {
+    const k = p.t / p.life;
+    ctx.globalAlpha = 1 - k;
+    ctx.font = 'bold 20px Arial'; ctx.textAlign = 'center';
+    ctx.lineWidth = 4; ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+    ctx.strokeText(p.text, p.x, p.y - k * 40);
+    ctx.fillStyle = p.color; ctx.fillText(p.text, p.x, p.y - k * 40);
+  }
+  ctx.globalAlpha = 1;
+  if (wipe > 0) {
+    ctx.globalAlpha = wipe; ctx.fillStyle = wipeCol; ctx.fillRect(0, 0, W, H); ctx.globalAlpha = 1;
+  }
+}
+
+// ============ LOOP ============
+function frame(ts) {
+  if (!lastFrameTs) lastFrameTs = ts;
+  const dt = Math.min(0.05, (ts - lastFrameTs) / 1000);
+  lastFrameTs = ts;
+  if (state === 'play') update(dt);
+  else { idleDist += dt * 6; time += dt; if (idleDist > 150) idleDist = 0; }
+  render();
+  requestAnimationFrame(frame);
+}
+
+reset();
+showTitle();
+requestAnimationFrame(frame);
+/*TEST_HOOK*/
+})();
+</script>
+</body>
+</html>

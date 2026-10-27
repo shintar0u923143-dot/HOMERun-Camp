@@ -115,7 +115,7 @@ const PHASES = [
     { name: "sheet-bear-coin", ratio: "16:9", gives: "bear-run-01, bear-run-02, coin-leaf",
       text: ["Make ONE wide image with three separate things in a row, evenly spaced:\n1. A big cartoon brown bear running toward the camera on all fours, mouth open, front paws reaching forward.\n2. The same bear running toward the camera, front paws pulled back, body bunched up.\n3. A shiny gold coin with a raised yellow-green leaf emblem and a thick rim, seen straight on.", CAM, LOOK, BG].join("\n\n") }
   ]},
-  { title: "Phase 3: Inside the house", items: [
+  { title: "Phase 3: Inside the house (kitchen and living room)", items: [
     { name: "sheet-tiles-house-a", ratio: "1:1", gives: "tile-house-01, tile-house-02",
       text: tileSheet("inside a house hallway", "Glossy green wooden floorboards running along the path, with a red runner rug down the middle lane; a cream baseboard color along the far left and right edges.",
         "plain floorboards and the red rug.", "the red rug has a subtle cream leaf pattern border.") },
@@ -136,10 +136,14 @@ const PHASES = [
       text: obstacleSheet("a wooden dining chair with a cushioned seat; the back of the chair faces the camera. About waist height.") },
     { name: "sheet-obs-cat", ratio: "16:9", gives: "obs-mid-lane-cat",
       text: obstacleSheet("a chubby orange tabby house cat sitting sideways across the lane, tail curled, looking back at the camera with big green eyes. Cute and friendly.") },
+    { name: "sheet-props-kitchen", ratio: "3:2", gives: "6 kitchen pieces, left and right versions",
+      text: propSheet(["a kitchen sink cabinet with a chrome faucet and a cream countertop", "a stove with a glass-door oven below and green knobs", "a tall glossy cream refrigerator with a green leaf magnet", "a tall cream pantry cabinet with green handles", "a wall shelf with a microwave and jars", "a large potted plant in a green pot"], 2, 3, "kitchen hallway").replace("stand beside a kitchen hallway path", "stand against the wall beside a kitchen hallway path") },
+    { name: "sheet-props-living", ratio: "3:2", gives: "6 living-room pieces, left and right versions",
+      text: propSheet(["a cozy three-seat sofa in leaf green with cream cushions", "a flat TV on a wooden TV stand", "a HOMER upright vacuum cleaner in green and cream (no text)", "a cream armchair with a green throw pillow", "a tall floor lamp with a warm glowing shade", "a wooden bookshelf with colorful books and a plant"], 2, 3, "living-room hallway") },
     { name: "sheet-obs-wagon", ratio: "16:9", gives: "obs-mid-lane-wagon",
       text: obstacleSheet("the HOMER foldable utility wagon: beige canvas basket on a black steel frame, black pull handle facing the camera, four chunky black wheels, with a glowing yellow-green ring on the floor under it.") }
   ]},
-  { title: "Phase 4: Backyard", items: [
+  { title: "Phase 4: Backyard and pool", items: [
     { name: "sheet-tiles-yard-a", ratio: "1:1", gives: "tile-backyard-01, tile-backyard-02",
       text: tileSheet("a sunny backyard", "Bright green lawn with cream rounded stepping stones forming a path across all three lanes; neat flower-bed edging along the outer sides.",
         "plain stepping stones and lawn.", "a few darker gray-green stones and small daisies in the grass.") },
@@ -149,8 +153,14 @@ const PHASES = [
     { name: "sheet-fence", ratio: "9:16", gives: "wall-yard-left-01/02, wall-yard-right-01/02",
       text: wallSheet("A cream picket fence with deep green posts and climbing yellow-green vines.",
         ["fence on the LEFT side of the yard.", "fence on the LEFT side of the yard, with a few red flowers in the vines.", "fence on the RIGHT side of the yard.", "fence on the RIGHT side of the yard, with a few red flowers in the vines."], true) },
-    { name: "sheet-props-yard", ratio: "1:1", gives: "4 props, left and right versions",
-      text: propSheet(["a round topiary-style garden tree with glossy green leaves", "a large glossy yellow-green hedge ball", "a deep green flower pot with red and yellow flowers", "a short cream garden lamp post with a green cap"], 2, 2, "backyard stepping-stone") },
+    { name: "sheet-props-yard", ratio: "16:9", gives: "8 yard props, left and right versions",
+      text: propSheet(["a round topiary-style garden tree with glossy green leaves", "a large glossy yellow-green hedge ball", "a deep green flower pot with red and yellow flowers", "a short cream garden lamp post with a green cap", "a green push lawn mower", "a white poolside sunbed (lounge chair) with a green cushion", "a striped green and cream beach umbrella on a stand", "a wooden picnic table with benches"], 2, 4, "backyard stepping-stone") },
+    { name: "sheet-volleyball", ratio: "16:9", gives: "3 volleyball players and the net",
+      text: ["Make ONE wide image with four separate things in a row, evenly spaced, each standing on its own ground line, seen from the side at a slight angle:\n1. A cheerful young adult woman in a sporty two-piece swimsuit and sun visor, jumping to spike a volleyball.\n2. Another young adult woman in a sporty two-piece swimsuit, bumping the ball with both arms, knees bent.\n3. A third young adult woman in a sporty two-piece swimsuit in a ready stance, smiling.\n4. A beach volleyball net on two green poles.\nFriendly, family-friendly cartoon style like Subway Surfers characters; no ball in the image.", LOOK, BG].join("\n\n") },
+    { name: "sheet-obs-float", ratio: "16:9", gives: "obs-mid-lane-float (pool obstacle)",
+      text: obstacleSheet("a big inflatable pool float ring with red and white stripes, floating flat, seen from behind and slightly above.") },
+    { name: "sheet-runner-swim", ratio: "16:9", gives: "runner-mid-lane-swim-01 to 04",
+      text: [`Make ONE wide image with four poses in a row of ${RUNNER}, swimming freestyle away from the camera, seen from BEHIND and slightly above. Show only his head, hat, shoulders, backpack and arms above a small patch of blue water; the rest of his body is under the water. Same size in every pose.`, "Pose 1: right arm reaching forward. Pose 2: right arm pulling down, small splash. Pose 3: left arm reaching forward. Pose 4: left arm pulling down, small splash.", CAM, LOOK, BG].join("\n\n") },
     { name: "horizon-backyard", ratio: "16:9", gives: "horizon-backyard",
       text: HORIZON("soft blue sky with puffy cream clouds, and hazy distant rooftops and round trees.") }
   ]}

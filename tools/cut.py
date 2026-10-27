@@ -18,15 +18,21 @@ def lanes(t): return [f'obs-{l}-lane-{t}' for l in ('left', 'mid', 'right')]
 RUN = ['run-01', 'run-02', 'run-03', 'run-04', 'jump', 'roll', 'climb-01', 'climb-02']
 
 SHEETS = {}
-for t in ('van', 'tent', 'grill', 'hammock', 'canopy', 'counter', 'table', 'chair', 'cat', 'wagon'):
+for t in ('van', 'tent', 'grill', 'hammock', 'canopy', 'counter', 'table', 'chair', 'cat', 'wagon', 'float'):
     SHEETS[f'sheet-obs-{t}'] = dict(kind='sprites', grid=(1, 3), names=lanes(t))
 for l in ('left', 'mid', 'right'):
     SHEETS[f'sheet-runner-{l}'] = dict(kind='sprites', grid=(2, 4), names=[f'runner-{l}-lane-{a}' for a in RUN])
 SHEETS['sheet-bear-coin'] = dict(kind='sprites', grid=(1, 3), names=['bear-run-01', 'bear-run-02', 'coin-leaf'])
 SHEETS['sheet-props-camp'] = dict(kind='sprites', grid=(2, 3), mirror=True,
     names=['pine-tall', 'pine-round', 'leafy-tree', 'bush', 'lantern-post', 'log-pile'])
-SHEETS['sheet-props-yard'] = dict(kind='sprites', grid=(2, 2), mirror=True,
-    names=['round-tree', 'hedge-ball', 'flower-pot', 'garden-lamp'])
+SHEETS['sheet-props-yard'] = dict(kind='sprites', grid=(2, 4), mirror=True,
+    names=['round-tree', 'hedge-ball', 'flower-pot', 'garden-lamp', 'lawn-mower', 'sunbed', 'beach-umbrella', 'picnic-table'])
+SHEETS['sheet-props-kitchen'] = dict(kind='sprites', grid=(2, 3), mirror=True,
+    names=['sink-cabinet', 'stove-oven', 'fridge', 'pantry', 'microwave-shelf', 'kitchen-plant'])
+SHEETS['sheet-props-living'] = dict(kind='sprites', grid=(2, 3), mirror=True,
+    names=['sofa', 'tv-stand', 'vacuum', 'armchair', 'floor-lamp', 'bookshelf'])
+SHEETS['sheet-volleyball'] = dict(kind='sprites', grid=(1, 4), names=['volley-player-1', 'volley-player-2', 'volley-player-3', 'volley-net'])
+SHEETS['sheet-runner-swim'] = dict(kind='sprites', grid=(1, 4), names=['runner-mid-lane-swim-01', 'runner-mid-lane-swim-02', 'runner-mid-lane-swim-03', 'runner-mid-lane-swim-04'])
 SHEETS['sheet-tiles-camp-a'] = dict(kind='tiles', trail=True, names=['tile-camp-01', 'tile-camp-02'])
 SHEETS['sheet-tiles-camp-b'] = dict(kind='tiles', trail=True, names=['tile-camp-03', 'tile-camp-04'])
 SHEETS['sheet-tiles-house-a'] = dict(kind='tiles', names=['tile-house-01', 'tile-house-02'])
@@ -104,10 +110,10 @@ def cut_sprites(im, spec, out):
         rgba = np.dstack([rgb_c, al_c * 255]).astype(np.uint8)
         piece = Image.fromarray(rgba, 'RGBA')
         if spec.get('mirror'):
-            save(piece.copy(), f'prop-right-{name}', out, 512)
-            save(piece.transpose(Image.FLIP_LEFT_RIGHT), f'prop-left-{name}', out, 512)
+            save(piece.copy(), f'prop-right-{name}', out, 1024)
+            save(piece.transpose(Image.FLIP_LEFT_RIGHT), f'prop-left-{name}', out, 1024)
         else:
-            save(piece, name, out, 512)
+            save(piece, name, out, 1024)
 
 
 def strip_gray(rgb, alpha):

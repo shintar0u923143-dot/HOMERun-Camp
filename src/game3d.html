@@ -10,7 +10,8 @@
   html,body{margin:0;height:100%;background:#1f4d1c;overflow:hidden;font-family:Arial,Helvetica,sans-serif;touch-action:none;-webkit-user-select:none;user-select:none}
   body{display:flex;align-items:center;justify-content:center}
   #stage{position:relative;height:min(100vh,calc(100vw * 7 / 4));aspect-ratio:4/7;width:auto;max-width:100vw;overflow:hidden;container-type:size}
-  #game{display:block;width:100%;height:100%}
+  #game{display:block;width:100%;height:100%;filter:saturate(1.22) contrast(1.08)}
+  #vignette{position:absolute;inset:0;pointer-events:none;background:radial-gradient(ellipse at 50% 45%,rgba(0,0,0,0) 58%,rgba(10,30,10,.32) 100%)}
   .ui{position:absolute;pointer-events:none;color:#fff;font-weight:800}
   #hud{top:1.4%;left:2.5%;right:2.5%;height:7%;display:none;align-items:center;justify-content:space-between;padding:0 4%;
        background:rgba(0,0,0,.38);border-radius:14px;font-size:5cqw}
@@ -58,6 +59,7 @@
 <body>
 <div id="stage">
   <canvas id="game"></canvas>
+  <div id="vignette"></div>
   <div id="hud" class="ui"><span id="hDist">0 m</span><span class="c" id="hCoins">&#9679; 0</span><span id="hScore">0</span></div>
   <div id="bear" class="ui"><span>BEAR</span><i><b id="bearFill"></b></i></div>
   <div id="boost" class="ui"></div>
@@ -71,6 +73,7 @@
 <script type="module">
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
+import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
 // ================= ASSETS (inlined by tools/build.py) =================
 const ASSETS = /*ASSETS*/{};
@@ -125,7 +128,8 @@ const TYPES = {
   chair:   { half:0.5, kind:'jump', clear:1.15, lethal:true },
   counter: { half:4.5, kind:'ramp', top:1.45, lethal:false },
   cat:     { half:0.5, kind:'jump', clear:0.75, lethal:true },
-  wagon:   { half:0.8, kind:'boost', lethal:false }
+  wagon:   { half:0.8, kind:'boost', lethal:false },
+  float:   { half:0.6, kind:'both', clear:0.95, lethal:true }
 };
 const POOLS = {
   outdoor:  ['grill','grill','tent','hammock','van','canopy'],
@@ -133,7 +137,7 @@ const POOLS = {
   backyard: ['grill','tent','hammock','van','canopy','grill']
 };
 const REASON = { grill:'You hit the BBQ grill!', tent:'You got caught by the tent!', hammock:'You got tangled in the hammock!',
-  table:'You bumped the table!', chair:'You tripped on the chair!', cat:'The house cat tripped you up!' };
+  table:'You bumped the table!', float:'You bonked the pool float!', chair:'You tripped on the chair!', cat:'The house cat tripped you up!' };
 
 // ================= RENDERER / SCENE =================
 const canvas = document.getElementById('game');
@@ -142,15 +146,23 @@ const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPrefere
 renderer.setPixelRatio(Math.min(2, window.devicePixelRatio || 1));
 renderer.outputColorSpace = THREE.SRGBColorSpace;
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.08;
+renderer.toneMappingExposure = 0.92;
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+const MAX_ANISO = renderer.capabilities.getMaxAnisotropy();
 const scene = new THREE.Scene();
-scene.fog = new THREE.Fog(FOG.outdoor, 45, 165);
+scene.fog = new THREE.Fog(FOG.outdoor, 70, 210);
 scene.background = new THREE.Color(FOG.outdoor);
+scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;   // glossy reflections
 const camera = new THREE.PerspectiveCamera(62, 4 / 7, 0.1, 420);
-scene.add(new THREE.HemisphereLight(0xEAF6FF, 0x6A8F4A, 1.25));
-const sun = new THREE.DirectionalLight(0xFFF2D8, 1.7);
-sun.position.set(-6, 12, 8);
-scene.add(sun);
+const hemi = new THREE.HemisphereLight(0xEAF6FF, 0x5E7F44, 0.75);
+scene.add(hemi);
+const sun = new THREE.DirectionalLight(0xFFF0D2, 2.3);
+sun.castShadow = true;
+sun.shadow.mapSize.set(2048, 2048);
+Object.assign(sun.shadow.camera, { left: -16, right: 16, top: 34, bottom: -10, near: 1, far: 90 });
+sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.03;
+scene.add(sun); scene.add(sun.target);
 function resize() {
   const w = stageEl.clientWidth, h = stageEl.clientHeight;
   renderer.setSize(w, h, false);
@@ -164,7 +176,7 @@ function texFromImage(key, opts = {}) {
   const ck = key + JSON.stringify(opts);
   if (texCache.has(ck)) return texCache.get(ck);
   const t = new THREE.Texture(img(key));
-  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8; t.needsUpdate = true;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO; t.needsUpdate = true;
   if (opts.repeatX) { t.wrapS = THREE.RepeatWrapping; t.repeat.x = opts.repeatX; }
   texCache.set(ck, t);
   return t;
@@ -174,7 +186,7 @@ function canvasTex(w, h, draw, key, opts = {}) {
   const c = document.createElement('canvas'); c.width = w; c.height = h;
   draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c);
-  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
+  t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = MAX_ANISO;
   if (opts.wrap) { t.wrapS = t.wrapT = THREE.RepeatWrapping; }
   if (key) texCache.set(key, t);
   return t;
@@ -244,6 +256,66 @@ const PROC = {
     if (k === 2) { g.fillStyle = '#8D6E63'; g.fillRect(260, 120, 190, 140); g.fillRect(560, 140, 160, 120); g.fillStyle = '#8CC63F'; g.fillRect(272, 132, 166, 116); g.fillStyle = '#7FD3F7'; g.fillRect(572, 152, 136, 96); }
     if (k === 3) { g.fillStyle = '#B98B62'; g.fillRect(420, 90, 200, h - 124); g.fillStyle = '#9A7049'; g.fillRect(436, 106, 168, h - 156); g.fillStyle = '#E2C26B'; g.beginPath(); g.arc(590, 300, 9, 0, 7); g.fill(); }
   }, 'proc-wall' + (v % 4)),
+  kitchenFloor: () => canvasTex(512, 1024, (g, w, h) => {
+    const t = 64;
+    for (let y = 0; y < h; y += t) for (let x = 0; x < w; x += t) { g.fillStyle = ((x + y) / t) % 2 ? '#F4EEDF' : '#5E9E48'; g.fillRect(x, y, t, t); }
+    g.fillStyle = 'rgba(255,255,255,.18)'; for (let y = 0; y < h; y += t) for (let x = 0; x < w; x += t) g.fillRect(x + 4, y + 4, t * .4, 6);
+  }, 'proc-kfloor'),
+  livingFloor: (v) => canvasTex(512, 1024, (g, w, h) => {
+    const pw = w / 10;
+    for (let i = 0; i < 10; i++) {
+      for (let y = -((i * 173) % 300); y < h; y += 300) {
+        const shade = 150 + Math.floor(hash(i * 31 + y) * 40);
+        g.fillStyle = `rgb(${shade + 40},${shade - 5},${shade - 60})`; g.fillRect(i * pw, y, pw, 300);
+        g.fillStyle = 'rgba(80,45,20,.25)'; for (let k = 0; k < 6; k++) g.fillRect(i * pw + 4 + k * pw / 6, y + 10, 1, 280);
+        g.fillStyle = 'rgba(60,35,15,.6)'; g.fillRect(i * pw, y, pw, 3);
+      }
+      g.fillStyle = 'rgba(60,35,15,.55)'; g.fillRect(i * pw, 0, 2, h);
+    }
+    const r0 = w * (0.25 + 0.5 / 3), r1 = w * (0.25 + 1 / 3);
+    g.fillStyle = '#C23A31'; g.fillRect(r0, 0, r1 - r0, h); g.fillStyle = '#E8C77A'; g.fillRect(r0 + 6, 0, 4, h); g.fillRect(r1 - 10, 0, 4, h);
+  }, 'proc-lfloor'),
+  kitchenWall: (v) => canvasTex(1024, 512, (g, w, h) => {
+    g.fillStyle = '#F7F1E3'; g.fillRect(0, 0, w, h);
+    for (let y = 180; y < 330; y += 30) for (let x = (y / 30 % 2) * 30; x < w; x += 60) { g.fillStyle = '#E6F2E0'; g.fillRect(x + 2, y + 2, 56, 26); }
+    g.fillStyle = '#6DBE45'; g.fillRect(0, 168, w, 10); g.fillRect(0, 332, w, 10);
+    g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, w, 18); g.fillStyle = '#B98B62'; g.fillRect(0, h - 30, w, 30);
+    if (v % 2) { g.fillStyle = '#FFFFFF'; g.fillRect(400, 30, 240, 120); g.fillStyle = '#A9E1FF'; g.fillRect(412, 42, 216, 96); }
+  }, 'proc-kwall' + (v % 2)),
+  livingWall: (v) => canvasTex(1024, 512, (g, w, h) => {
+    g.fillStyle = '#EFE6D2'; g.fillRect(0, 0, w, h);
+    g.fillStyle = 'rgba(109,190,69,.18)';
+    for (let y = 20; y < 300; y += 48) for (let x = (y / 48 % 2) * 32; x < w; x += 64) { g.beginPath(); g.ellipse(x, y, 7, 13, .6, 0, 7); g.fill(); }
+    g.fillStyle = '#4E8C35'; g.fillRect(0, 300, w, h - 300); g.fillStyle = '#F7F1E3'; g.fillRect(0, 296, w, 10);
+    for (let x = 30; x < w; x += 120) { g.strokeStyle = 'rgba(255,255,255,.35)'; g.lineWidth = 4; g.strokeRect(x, 330, 90, 140); }
+    g.fillStyle = '#FFFFFF'; g.fillRect(0, 0, w, 18);
+    if (v % 2) { g.fillStyle = '#8D6E63'; g.fillRect(420, 90, 190, 140); g.fillStyle = '#7FD3F7'; g.fillRect(432, 102, 166, 116); g.fillStyle = '#6DBE45'; g.beginPath(); g.moveTo(432, 218); g.lineTo(500, 150); g.lineTo(560, 200); g.lineTo(598, 170); g.lineTo(598, 218); g.fill(); }
+  }, 'proc-lwall' + (v % 2)),
+  rug: () => canvasTex(256, 256, (g, w, h) => {
+    const cols = ['#C6D62C', '#F7F1E3', '#6DBE45', '#F7F1E3', '#D8463C'];
+    for (let i = 0; i < 5; i++) { g.fillStyle = cols[i]; g.beginPath(); g.arc(w / 2, h / 2, w / 2 - i * 24, 0, 7); g.fill(); }
+  }, 'proc-rug'),
+  lawn: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#5DAE45'; g.fillRect(0, 0, w, h);
+    for (let i = 0; i < 4; i++) { g.fillStyle = i % 2 ? 'rgba(255,255,255,.05)' : 'rgba(0,0,0,.04)'; g.fillRect(0, i * h / 4, w, h / 4); }
+    for (let i = 0; i < 260; i++) { g.fillStyle = 'rgba(40,110,35,.35)'; g.fillRect(hash(i) * w, hash(i + 5) * h, 2, 6); }
+  }, 'proc-lawn', { wrap: true }),
+  deck: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#EFE6D3'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#D9CCB0'; g.lineWidth = 3; for (let x = 0; x <= w; x += 64) for (let y = 0; y <= h; y += 64) g.strokeRect(x, y, 64, 64);
+  }, 'proc-deck', { wrap: true }),
+  poolTile: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#7FD0EE'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = '#A6E2F6'; g.lineWidth = 3; for (let x = 0; x <= w; x += 32) for (let y = 0; y <= h; y += 32) g.strokeRect(x, y, 32, 32);
+  }, 'proc-pooltile', { wrap: true }),
+  water: () => canvasTex(256, 256, (g, w, h) => {
+    g.fillStyle = '#3FB4E4'; g.fillRect(0, 0, w, h);
+    g.strokeStyle = 'rgba(255,255,255,.55)'; g.lineWidth = 2.5;
+    for (let i = 0; i < 26; i++) {
+      const x = hash(i) * w, y = hash(i + 7) * h, r = 12 + hash(i + 3) * 26;
+      g.beginPath(); g.moveTo(x - r, y); g.bezierCurveTo(x - r / 2, y - r / 3, x + r / 2, y + r / 3, x + r, y); g.stroke();
+    }
+  }, 'proc-water', { wrap: true }),
   ceiling: () => canvasTex(512, 512, (g, w, h) => {
     g.fillStyle = '#F5EEDF'; g.fillRect(0, 0, w, h);
     g.fillStyle = '#FFFDF2'; g.fillRect(w * .3, h * .35, w * .4, h * .3);
@@ -261,13 +333,29 @@ const PROC = {
 
 // ================= SHARED MATERIALS =================
 const M = {};
-function mat(key, opts) { return M[key] || (M[key] = new THREE.MeshStandardMaterial(Object.assign({ roughness: 0.45, metalness: 0.05 }, opts))); }
-const shadowMat = new THREE.MeshBasicMaterial({ color: 0x14260C, transparent: true, opacity: 0.28, depthWrite: false });
+function mat(key, opts) { return M[key] || (M[key] = new THREE.MeshStandardMaterial(Object.assign({ roughness: 0.45, metalness: 0.05, envMapIntensity: 0.55 }, opts))); }
+const shadowMat = new THREE.MeshBasicMaterial({ color: 0x14260C, transparent: true, opacity: 0.2, depthWrite: false });
 const shadowGeo = new THREE.CircleGeometry(1, 24);
 function blobShadow(rx, rz) {
   const m = new THREE.Mesh(shadowGeo, shadowMat);
   m.rotation.x = -Math.PI / 2; m.scale.set(rx, rz, 1); m.position.y = 0.02;
   return m;
+}
+// Gemini art as upright cards: unlit (the art is already lit), cut out, and casting real shadows
+const cardGeo = new THREE.PlaneGeometry(1, 1).translate(0, 0.5, 0);
+function imageCard(key, height) {
+  const im = img(key); if (!im) return null;
+  const w = height * im.naturalWidth / im.naturalHeight;
+  const mesh = new THREE.Mesh(cardGeo, cachedMat('card' + key, () => new THREE.MeshBasicMaterial({ map: texFromImage(key), alphaTest: 0.4, side: THREE.DoubleSide })));
+  mesh.scale.set(w, height, 1);
+  mesh.castShadow = true;
+  mesh.customDepthMaterial = cachedMat('depth' + key, () => new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: texFromImage(key), alphaTest: 0.4 }));
+  mesh.userData.w = w;
+  return mesh;
+}
+function castShadows(g) {
+  g.traverse(o => { if (o.isMesh && o.material !== shadowMat && !o.material.isMeshBasicMaterial) { o.castShadow = true; o.receiveShadow = true; } });
+  return g;
 }
 const G = {};   // shared geometries
 function box(w, h, d, material, r = 0) {
@@ -296,6 +384,17 @@ const BUILD = {
     g.add(at(box(w, bodyH, len, cream, 0.28), 0, lift + bodyH / 2, 0));
     g.add(at(box(w + 0.04, 0.32, len + 0.04, green, 0.06), 0, lift + 0.75, 0));
     g.add(at(box(w - 0.1, 0.12, len - 0.3, dark, 0.05), 0, lift + bodyH - 0.02, 0));
+    const rear = imageCard('obs-mid-lane-van', 2.8);
+    if (rear) {            // the Gemini van picture is the back of the van; the 3D body runs forward from it
+      rear.position.set(0, 0, len / 2 + 0.04); g.add(rear);
+      for (const x of [-w / 2, w / 2]) for (const z of [-len / 2 + 1.1, len / 2 - 2.2]) {
+        const t = at(cyl(0.42, 0.42, 0.3, mat('tyre', { color: 0x1C1C1C, roughness: 0.8 }), 20), x, 0.42, z); t.rotation.z = Math.PI / 2; g.add(t);
+      }
+      const glass = mat('glass', { color: 0x5E8FB0, roughness: 0.15, metalness: 0.3 });
+      for (const x of [-w / 2 - 0.01, w / 2 + 0.01]) g.add(at(box(0.03, 0.55, 1.6, glass, 0.02), x, lift + 1.4, 0));
+      g.add(blobShadow(1.5, len / 2 + 0.4));
+      return castShadows(g);
+    }
     g.add(at(box(w + 0.1, 0.32, 0.35, dark, 0.1), 0, lift + 0.12, len / 2 - 0.1));          // rear bumper
     // rear: porthole windows, tail lights, ladder
     const glass = mat('glass', { color: 0x5E8FB0, roughness: 0.15, metalness: 0.3 }), white = mat('white', { color: 0xFFFFFF });
@@ -423,6 +522,12 @@ const BUILD = {
     g.add(blobShadow(0.65, 0.4));
     return g;
   },
+  float() {
+    const g = new THREE.Group();
+    const ring = new THREE.Mesh(new THREE.TorusGeometry(0.62, 0.26, 16, 32), new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#FFFFFF'], 8), roughness: 0.25 }));
+    ring.position.y = 0.15; ring.rotation.x = -Math.PI / 2 + 0.35; g.add(ring); g.userData.bob = ring;
+    return g;
+  },
   wagon() {
     const g = new THREE.Group();
     const ring = new THREE.Mesh(new THREE.RingGeometry(0.9, 1.15, 32), new THREE.MeshBasicMaterial({ color: 0xC6D62C, transparent: true, opacity: 0.8, side: THREE.DoubleSide }));
@@ -437,6 +542,22 @@ const BUILD = {
     return g;
   }
 };
+
+const CARD_H = { grill:1.3, tent:2.85, hammock:1.35, canopy:3.4, table:1.6, chair:1.45, cat:0.9, wagon:1.5, float:1.1, counter:1.6 };
+function buildObstacle(type) {
+  if (type === 'van') return castShadows(BUILD.van());
+  const key = img(`obs-mid-lane-${type}`) ? `obs-mid-lane-${type}` : (type === 'canopy' && img('canopy') ? 'canopy' : null);
+  if (key && type === 'counter') {   // counter keeps its 3D length behind the picture
+    const g = BUILD.counter(); const c = imageCard(key, CARD_H.counter); c.position.z = TYPES.counter.half + 0.05; g.add(c); return castShadows(g);
+  }
+  if (key) {
+    const g = new THREE.Group(); const c = imageCard(key, CARD_H[type]); g.add(c);
+    g.add(blobShadow(c.userData.w * 0.42, 0.6));
+    if (type === 'float') g.userData.bob = c;
+    return g;
+  }
+  return castShadows(BUILD[type]());
+}
 
 // bear chaser, coin
 function buildBear() {
@@ -470,18 +591,23 @@ function buildCoin() {
 // ================= WORLD CHUNKS (ground, walls, fences, trees, doors) =================
 const world = new THREE.Group(); scene.add(world);
 const chunks = [];
-const PROP_H = { 'pine-tall':7.5, 'pine-round':5.5, 'leafy-tree':5.8, 'bush':1.8, 'lantern-post':3.2, 'log-pile':1.7 };
+const PROP_H = { 'pine-tall':7.5, 'pine-round':5.5, 'leafy-tree':5.8, 'bush':1.8, 'lantern-post':3.2, 'log-pile':1.7,
+  'round-tree':5.0, 'hedge-ball':2.0, 'flower-pot':1.1, 'garden-lamp':2.2, 'lawn-mower':1.1, 'sunbed':1.0, 'beach-umbrella':3.0, 'picnic-table':1.3,
+  'sink-cabinet':2.1, 'stove-oven':2.1, 'fridge':3.1, 'pantry':3.3, 'microwave-shelf':2.6, 'kitchen-plant':1.9,
+  'sofa':1.6, 'tv-stand':2.6, 'vacuum':1.7, 'armchair':1.5, 'floor-lamp':3.0, 'bookshelf':3.4 };
 const CAMP_PROPS = ['pine-tall', 'pine-tall', 'pine-round', 'leafy-tree', 'bush', 'lantern-post', 'log-pile'];
-const YARD_PROPS = ['leafy-tree', 'bush', 'pine-round', 'bush'];
-const spriteMats = {};
-function propSprite(name, side, hgt) {
+const YARD_PROPS = ['round-tree', 'hedge-ball', 'flower-pot', 'garden-lamp', 'lawn-mower', 'picnic-table', 'leafy-tree', 'bush'];
+const KITCHEN = ['sink-cabinet', 'stove-oven', 'fridge', 'pantry', 'microwave-shelf', 'kitchen-plant'];
+const LIVING = ['sofa', 'tv-stand', 'vacuum', 'armchair', 'floor-lamp', 'bookshelf'];
+const KITCHEN_TILES = 7;                 // first 7 tiles of the house are the kitchen, the rest the living room
+const POOL = [5, 8];                     // backyard tiles 5..7 are the swimming pool
+function propCard(name, side, hgt) {
   const key = `prop-${side < 0 ? 'left' : 'right'}-${name}`;
-  const im = img(key); if (!im) return null;
-  const sm = spriteMats[key] || (spriteMats[key] = new THREE.SpriteMaterial({ map: texFromImage(key), alphaTest: 0.08 }));
-  const s = new THREE.Sprite(sm);
-  s.center.set(0.5, 0.02);
-  s.scale.set(hgt * im.naturalWidth / im.naturalHeight, hgt, 1);
-  return s;
+  const c = imageCard(key, hgt);
+  if (!c) return null;
+  const g = new THREE.Group(); g.add(c);
+  g.add(blobShadow(c.userData.w * 0.3, 0.7));
+  return g;
 }
 function groundTexFor(id, n, local) {
   const pre = id === 'outdoor' ? 'tile-camp' : id === 'house' ? 'tile-house' : 'tile-backyard';
@@ -490,38 +616,65 @@ function groundTexFor(id, n, local) {
   const k = Math.round(local / L);
   if (enter && k === 0 && img(enter)) return { tex: texFromImage(enter), key: enter };
   if (list.length) { const key = list[wrap(n, list.length)]; return { tex: texFromImage(key), key }; }
-  return { tex: id === 'outdoor' ? PROC.camp() : id === 'house' ? PROC.house(n) : PROC.yard(), key: null };
+  if (id === 'house') return { tex: k < KITCHEN_TILES ? PROC.kitchenFloor() : PROC.livingFloor(n), key: null };
+  return { tex: id === 'outdoor' ? PROC.camp() : PROC.yard(), key: null };
 }
 const groundGeo = new THREE.PlaneGeometry(TW, L);
-const wallGeo = new THREE.PlaneGeometry(L, HALL_H), ceilGeo = new THREE.PlaneGeometry(HALL_X * 2, L), fenceGeo = new THREE.PlaneGeometry(L, 1.5);
+const wallGeo = new THREE.PlaneGeometry(L, HALL_H), ceilGeo = new THREE.PlaneGeometry(HALL_X * 2, L), fenceGeo = new THREE.PlaneGeometry(L, 1.6);
 const matCache = new Map();
 function cachedMat(key, make) { if (!matCache.has(key)) matCache.set(key, make()); return matCache.get(key); }
 const sideGeo = new THREE.PlaneGeometry(60, L);
+const FENCE_X = 17;
+const POOL_W = TW * 0.5 + 0.6;           // water covers the three lanes
+let waterTex = null;
 function buildChunk(n) {
   const g = new THREE.Group();
   const s0 = n * L, info = stageAt(s0 + 0.01), id = info.id;
+  const k = Math.round(info.local / L);
+  const pool = id === 'backyard' && k >= POOL[0] && k < POOL[1];
   const gt = groundTexFor(id, n, info.local);
-  const ground = new THREE.Mesh(groundGeo, cachedMat('g' + gt.tex.uuid, () => new THREE.MeshStandardMaterial({ map: gt.tex, roughness: 0.9 })));
-  ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, -L / 2); g.add(ground);
+  const groundMat = cachedMat('g' + gt.tex.uuid, () => new THREE.MeshStandardMaterial({ map: gt.tex, roughness: 0.85, envMapIntensity: 0.15 }));
+  if (!pool) {
+    const ground = new THREE.Mesh(groundGeo, groundMat);
+    ground.rotation.x = -Math.PI / 2; ground.position.set(0, 0, -L / 2); ground.receiveShadow = true; g.add(ground);
+  } else buildPoolChunk(g, k);
   for (const side of [-1, 1]) {
     let m;
-    if (gt.key) m = cachedMat('side' + gt.key + side, () => { const tt = sideTex(gt.key, side).clone(); tt.needsUpdate = true; tt.repeat.set(60 / (TW * 0.22), 1); return new THREE.MeshStandardMaterial({ map: tt, roughness: 0.95 }); });
-    else m = mat('side' + id, { color: id === 'house' ? 0x4E8C35 : id === 'backyard' ? 0x5BAA44 : 0x6DB848, roughness: 0.95 });
-    const sp = new THREE.Mesh(sideGeo, m); sp.rotation.x = -Math.PI / 2; sp.position.set(side * (TW / 2 + 30), -0.01, -L / 2); g.add(sp);
+    if (gt.key) m = cachedMat('side' + gt.key + side, () => { const tt = sideTex(gt.key, side).clone(); tt.needsUpdate = true; tt.repeat.set(60 / (TW * 0.22), 1); return new THREE.MeshStandardMaterial({ map: tt, roughness: 0.95, envMapIntensity: 0.15 }); });
+    else if (id === 'backyard') m = cachedMat('yardside', () => { const t = PROC.lawn().clone(); t.needsUpdate = true; t.repeat.set(12, 4); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, envMapIntensity: 0.15 }); });
+    else m = mat('side' + id, { color: id === 'house' ? 0x7A5634 : 0x6DB848, roughness: 0.95 });
+    const sp = new THREE.Mesh(sideGeo, m); sp.rotation.x = -Math.PI / 2; sp.position.set(side * (TW / 2 + 30), -0.01, -L / 2); sp.receiveShadow = true; g.add(sp);
   }
   if (id === 'house') {
+    const kitchen = k < KITCHEN_TILES;
     for (const side of [-1, 1]) {
       const wk = `wall-house-${side < 0 ? 'left' : 'right'}-0${1 + wrap(n, 4)}`;
-      const wt = img(wk) ? texFromImage(wk) : PROC.wall(n * 2 + (side > 0 ? 1 : 0));
-      const wall = new THREE.Mesh(wallGeo, cachedMat('w' + wt.uuid, () => new THREE.MeshStandardMaterial({ map: wt, roughness: 0.8, emissive: 0x3A342A, emissiveMap: wt })));
+      const wt = img(wk) ? texFromImage(wk) : (kitchen ? PROC.kitchenWall(n + (side > 0 ? 1 : 0)) : PROC.livingWall(n + (side > 0 ? 1 : 0)));
+      const wall = new THREE.Mesh(wallGeo, cachedMat('w' + wt.uuid, () => new THREE.MeshStandardMaterial({ map: wt, roughness: 0.75, envMapIntensity: 0.25, emissive: 0x1E1B16, emissiveMap: wt })));
       wall.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
-      wall.position.set(side * HALL_X, HALL_H / 2, -L / 2); g.add(wall);
+      wall.position.set(side * HALL_X, HALL_H / 2, -L / 2); wall.receiveShadow = true; g.add(wall);
     }
     const ceil = new THREE.Mesh(ceilGeo, cachedMat('ceil', () => { const t = PROC.ceiling().clone(); t.needsUpdate = true; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 4); return new THREE.MeshBasicMaterial({ map: t, color: 0xF2ECDF }); }));
     ceil.rotation.x = Math.PI / 2; ceil.position.set(0, HALL_H, -L / 2); g.add(ceil);
-    // a roof over the hallway so it reads as a house from outside
     const roof = box(HALL_X * 2 + 1, 0.4, L, mat('roofgreen', { color: 0x2F6A2E }));
     roof.position.set(0, HALL_H + 0.5, -L / 2); g.add(roof);
+    // furniture against the walls: kitchen first, then the living room
+    const list = kitchen ? KITCHEN : LIVING;
+    for (const side of [-1, 1]) for (let i = 0; i < 3; i++) {
+      const name = list[Math.floor(hash(n * 7.7 + i * 3.1 + side) * list.length)];
+      const pc = propCard(name, side, PROP_H[name] || 2);
+      if (!pc) continue;
+      const w = pc.children[0].userData.w;
+      pc.position.set(side * (HALL_X - Math.min(1.2, w * 0.35) - 0.15), 0, -(i + 0.5) * L / 3);
+      pc.rotation.y = -side * 0.35;
+      g.add(pc);
+    }
+    if (!kitchen) {   // living-room rugs beside the path
+      for (const side of [-1, 1]) {
+        const rug = new THREE.Mesh(new THREE.CircleGeometry(1.1, 32), cachedMat('rug', () => new THREE.MeshStandardMaterial({ map: PROC.rug(), roughness: 0.95 })));
+        rug.rotation.x = -Math.PI / 2; rug.position.set(side * 4.0, 0.02, -L * (0.3 + 0.4 * hash(n + side))); rug.receiveShadow = true; g.add(rug);
+      }
+    }
   }
   if (id === 'backyard') {
     const ft = PROC.fence();
@@ -533,27 +686,78 @@ function buildChunk(n) {
       });
       const fence = new THREE.Mesh(fenceGeo, fm);
       fence.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
-      fence.position.set(side * 6.6, 0.75, -L / 2); g.add(fence);
+      fence.position.set(side * FENCE_X, 0.8, -L / 2); fence.castShadow = true; g.add(fence);
     }
+    if (k === 11) addVolleyball(g);
   }
-  // trees and props
+  // trees and props along the path
   const props = id === 'outdoor' ? CAMP_PROPS : id === 'backyard' ? YARD_PROPS : null;
   if (props && info.local > 2 && info.end > L * 0.6) {
     for (const side of [-1, 1]) for (let i = 0; i < 6; i++) {
       const h1 = hash(n * 13.1 + i * 3.7 + side), h2 = hash(n * 5.3 + i * 11.9 - side), h3 = hash(n * 2.9 + i * 7.1 + side * 3);
-      const name = props[Math.floor(h1 * props.length)];
-      const minX = id === 'backyard' ? 7.6 : 6.4;
-      const sp = propSprite(name, side, PROP_H[name] * (0.8 + h3 * 0.4));
-      if (!sp) continue;
-      sp.position.set(side * (minX + h2 * 10 + (name === 'bush' || name === 'log-pile' ? -0.4 : 0.8)), 0, -(i + h3) * L / 6);
-      g.add(sp);
+      let name = props[Math.floor(h1 * props.length)];
+      if (pool && i < 3) name = i % 2 ? 'beach-umbrella' : 'sunbed';            // poolside loungers
+      const near = pool && i < 3;
+      const minX = near ? POOL_W / 2 + 1.0 : (id === 'backyard' ? 6.0 : 6.4);
+      const spread = near ? 1.2 : (id === 'backyard' ? 9 : 10);
+      const pc = propCard(name, side, PROP_H[name] * (0.85 + h3 * 0.3));
+      if (!pc) continue;
+      pc.position.set(side * (minX + h2 * spread + (name === 'bush' || name === 'log-pile' ? -0.4 : 0.8)), 0, -(i + h3) * L / 6);
+      g.add(pc);
     }
   }
-  // doors at stage changes: front door into the house, back door out to the yard
-  if (id === 'house' && Math.round(info.local / L) === 0) g.add(buildFacade('front'));
-  if (id === 'backyard' && Math.round(info.local / L) === 0) g.add(buildFacade('back'));
+  if (id === 'house' && k === 0) g.add(castShadows(buildFacade('front')));
+  if (id === 'backyard' && k === 0) g.add(buildFacade('back'));
   g.userData.n = n;
   return g;
+}
+
+// ---- swimming pool ----
+function buildPoolChunk(g, k) {
+  const deckMat = cachedMat('deck', () => { const t = PROC.deck().clone(); t.needsUpdate = true; t.repeat.set(2, 8); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }); });
+  const deckW = TW / 2 - POOL_W / 2;
+  for (const side of [-1, 1]) {
+    const d = new THREE.Mesh(new THREE.PlaneGeometry(deckW, L), deckMat);
+    d.rotation.x = -Math.PI / 2; d.position.set(side * (POOL_W / 2 + deckW / 2), 0, -L / 2); d.receiveShadow = true; g.add(d);
+    const coping = box(0.5, 0.14, L, mat('coping', { color: 0xF4EEE2, roughness: 0.5 }));
+    coping.position.set(side * (POOL_W / 2 + 0.25), 0.04, -L / 2); coping.receiveShadow = true; g.add(coping);
+    const inner = new THREE.Mesh(new THREE.PlaneGeometry(L, 1.5), cachedMat('poolwall', () => new THREE.MeshStandardMaterial({ map: PROC.poolTile(), color: 0xBFE9F7, roughness: 0.3 })));
+    inner.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2; inner.position.set(side * POOL_W / 2, -0.75, -L / 2); g.add(inner);
+  }
+  const floor = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, L), cachedMat('poolfloor', () => { const t = PROC.poolTile().clone(); t.needsUpdate = true; t.repeat.set(2, 8); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.4 }); }));
+  floor.rotation.x = -Math.PI / 2; floor.position.set(0, -1.5, -L / 2); g.add(floor);
+  if (!waterTex) { waterTex = PROC.water(); waterTex.repeat.set(1.5, 6); }
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, L), cachedMat('water', () => new THREE.MeshStandardMaterial({ map: waterTex, color: 0x9EDCF2, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.8, envMapIntensity: 1.4 })));
+  water.rotation.x = -Math.PI / 2; water.position.set(0, -0.12, -L / 2); water.receiveShadow = true; g.add(water);
+  for (const edge of (k === POOL[0] ? [0] : k === POOL[1] - 1 ? [-L] : [])) {   // pool ends
+    const c = box(POOL_W + 1, 0.14, 0.5, mat('coping', { color: 0xF4EEE2, roughness: 0.5 }));
+    c.position.set(0, 0.04, edge + (edge === 0 ? -0.25 : 0.25)); g.add(c);
+    const wall = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, 1.5), cachedMat('poolwall', () => null));
+    wall.position.set(0, -0.75, edge + (edge === 0 ? -0.5 : 0.5)); if (edge !== 0) wall.rotation.y = Math.PI; g.add(wall);
+  }
+  // pool lane ropes between the lanes
+  for (const x of [-LANE_W / 2, LANE_W / 2]) {
+    const rope = new THREE.Mesh(new THREE.CylinderGeometry(0.06, 0.06, L, 6), cachedMat('lanerope', () => new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#FFFFFF', '#2F7FD0', '#FFFFFF'], 4, false), roughness: 0.4 })));
+    rope.rotation.x = Math.PI / 2; rope.position.set(x, -0.06, -L / 2); g.add(rope);
+  }
+}
+const inPool = s => { const st = stageAt(s); return st.id === 'backyard' && st.local >= POOL[0] * L && st.local < POOL[1] * L; };
+
+// ---- volleyball game on the lawn (only if the art exists) ----
+const volleyBalls = [];
+function addVolleyball(g) {
+  const net = imageCard('volley-net', 2.6), p1 = imageCard('volley-player-1', 2.0), p2 = imageCard('volley-player-2', 2.0), p3 = imageCard('volley-player-3', 2.0);
+  if (!net || !p1 || !p2) return;
+  const court = new THREE.Group(); court.position.set(-10.5, 0, -L / 2);
+  net.position.set(0, 0, 0); court.add(net);
+  p1.position.set(-2.2, 0, 0.6); court.add(p1);
+  p2.position.set(2.4, 0, -0.4); court.add(p2);
+  if (p3) { p3.position.set(-3.6, 0, -1.2); court.add(p3); }
+  const sand = new THREE.Mesh(new THREE.PlaneGeometry(9, 5), mat('sand', { color: 0xEAD7A6, roughness: 1 }));
+  sand.rotation.x = -Math.PI / 2; sand.position.y = 0.015; sand.receiveShadow = true; court.add(sand);
+  const ball = new THREE.Mesh(new THREE.SphereGeometry(0.22, 20, 14), new THREE.MeshStandardMaterial({ map: stripes(['#FFFFFF', '#2F7FD0', '#FFFFFF', '#F2C531'], 6), roughness: 0.4 }));
+  ball.castShadow = true; court.add(ball); volleyBalls.push(ball);
+  g.add(court);
 }
 function buildFacade(kind) {
   const g = new THREE.Group();
@@ -607,7 +811,7 @@ function buildHorizon() {
 }
 
 // ================= RUNNER =================
-const RUN_POSES = ['run-01', 'run-02', 'run-03', 'run-04', 'jump', 'roll', 'climb-01', 'climb-02'];
+const RUN_POSES = ['run-01', 'run-02', 'run-03', 'run-04', 'jump', 'roll', 'climb-01', 'climb-02', 'swim-01', 'swim-02', 'swim-03', 'swim-04'];
 let runner, runnerMats = {}, runnerRef = 1;
 function buildRunner() {
   const ref = img('runner-mid-lane-run-01');
@@ -624,6 +828,8 @@ function buildRunner() {
     runner.add(at(sphere(0.25, mat('skin', { color: 0xE9B58E })), 0, 1.75, 0));
   }
   const sh = blobShadow(0.55, 0.35); sh.material = shadowMat; runner.add(sh); runner.userData.shadow = sh;
+  const splash = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.7, 28), new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.6, depthWrite: false }));
+  splash.rotation.x = -Math.PI / 2; splash.visible = false; runner.add(splash); runner.userData.splash = splash;
   scene.add(runner);
 }
 function setRunnerPose() {
@@ -633,6 +839,7 @@ function setRunnerPose() {
   else if (player.climb) p = Math.sin(time * 18) > 0 ? 'climb-01' : 'climb-02';
   else if (player.airborne) p = 'jump';
   else p = 'run-0' + (1 + Math.floor(time * 10) % 4);
+  if (inPool(dist) && !player.airborne && player.roll <= 0 && runnerMats['swim-01']) p = 'swim-0' + (1 + Math.floor(time * 7) % 4);
   if (state === 'title') p = 'run-0' + (1 + Math.floor(time * 6) % 4);
   const m = runnerMats[p] || runnerMats['run-01'];
   s.material = m;
@@ -789,7 +996,7 @@ function nearBoundary(s) {
   return false;
 }
 function addObstacle(type, lane, s) {
-  const mesh = BUILD[type](); world.add(mesh);
+  const mesh = buildObstacle(type); world.add(mesh);
   const o = { type, lane, s, mesh, done: false, tight: false, bonus: false, used: false };
   obstacles.push(o); addCoinsOn(o); return o;
 }
@@ -797,7 +1004,8 @@ function addCoin(lane, s, h) { const mesh = buildCoin(); world.add(mesh); coins.
 function spawnRow() {
   const s = dist + SPAWN_S;
   if (nearBoundary(s)) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return; }
-  const pool = POOLS[stageAt(s).id];
+  const pool = inPool(s) ? ['float', 'float'] : POOLS[stageAt(s).id];
+  if (!inPool(s) && (inPool(s + 12) || inPool(s - 12))) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return; }   // clear pool edges
   const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
   const count = (dist > 300 && Math.random() < 0.35) ? 2 : 1;
   const used = [];
@@ -814,6 +1022,8 @@ function addCoinsOn(o) {
       for (let j = -2; j <= 2; j++) addCoin(o.lane, o.s + j * 1.1, 0.5); break;
     case 'van': case 'counter':
       for (let j = -3; j <= 3; j++) addCoin(o.lane, o.s + j * (T.half / 3.5), T.top + 0.5); break;
+    case 'float':
+      for (let j = -3; j <= 3; j++) addCoin(o.lane, o.s + j * 1.1, 1.6 - j * j * 0.1); break;
     case 'canopy': case 'wagon':
       for (let j = -2; j <= 2; j++) addCoin(o.lane, o.s + j * 1.3, 0.5); break;
   }
@@ -900,12 +1110,22 @@ function syncScene(dt, viewDist) {
   for (const c of coins) { c.mesh.visible = !c.got && c.s - viewDist > -0.8; c.mesh.position.set(laneX(c.lane), c.h + 0.45, -(c.s - viewDist)); c.mesh.rotation.y = time * 3 + c.s; }
 
   // runner
-  runner.position.set(player.xw, player.h, 0);
+  const swimming = state !== 'title' && inPool(viewDist);
+  const sink = swimming ? (player.roll > 0 ? 1.9 : (player.airborne ? 0 : 0.95)) : 0;
+  runner.position.set(player.xw, player.h - sink, 0);
   setRunnerPose();
-  const sh = runner.userData.shadow;
+  const sh = runner.userData.shadow, splash = runner.userData.splash;
   const floorH = rampUnder();
+  sh.visible = !swimming;
   sh.position.y = 0.04 + floorH - player.h;
   const ss = Math.max(0.4, 1 - (player.h - floorH) / 4); sh.scale.set(0.55 * ss, 0.35 * ss, 1);
+  splash.visible = swimming && !player.airborne && player.roll <= 0;
+  if (splash.visible) { splash.position.y = sink - 0.1; const k = 1 + 0.15 * Math.sin(time * 12); splash.scale.set(k, k, 1); }
+  if (waterTex) { waterTex.offset.y = (waterTex.offset.y + dt * 0.12) % 1; waterTex.offset.x = Math.sin(time * 0.7) * 0.03; }
+  for (const o of obstacles) if (o.mesh.userData.bob) o.mesh.userData.bob.position.y = (o.type === 'float' && o.mesh.userData.bob.isMesh && o.mesh.userData.bob.geometry.type === 'TorusGeometry' ? 0.15 : -0.35) + Math.sin(time * 3 + o.s) * 0.08;
+  volleyBalls.forEach((b, i) => { const t = (time * 0.55 + i * 0.3) % 1, dir = Math.floor(time * 0.55 + i * 0.3) % 2; const u = dir ? t : 1 - t; b.position.set(-2.2 + 4.6 * u, 1.9 + Math.sin(t * Math.PI) * 2.4, 0.3 - 0.7 * u); });
+  // the sun (and its shadow area) follows the runner
+  sun.position.set(camX - 9, 24, 8); sun.target.position.set(camX, 0, -14);
 
   // bear
   const showBear = state !== 'title' && (bearD < 0.98 || time - lastNear < 2.5);
@@ -930,7 +1150,8 @@ function syncScene(dt, viewDist) {
   const sid = stageAt(viewDist).id;
   tmpCol.set(FOG[sid]); fogCol.lerp(tmpCol, Math.min(1, dt * 1.5));
   scene.fog.color.copy(fogCol); scene.background.copy(fogCol);
-  scene.fog.near = sid === 'house' ? 30 : 45; scene.fog.far = sid === 'house' ? 120 : 165;
+  scene.fog.near = sid === 'house' ? 40 : 70; scene.fog.far = sid === 'house' ? 140 : 210;
+  hemi.intensity = sid === 'house' ? 1.05 : 0.75;
   horizon.position.set(camera.position.x * 0.98, horizon.userData.h / 2 - 10, -380);
   horizon.visible = sid !== 'house' || stageAt(viewDist).end < 40;
 
@@ -951,6 +1172,20 @@ function rampUnder() {
   return 0;
 }
 
+// ================= AUTO QUALITY =================
+// If a phone can't keep ~40 fps, first drop the render resolution, then the soft shadows.
+let qLevel = 0, qTime = 0, qFrames = 0;
+function autoQuality(dt) {
+  if (state !== 'play' || qLevel >= 2) return;
+  qTime += dt; qFrames++;
+  if (qTime < 3) return;
+  const fps = qFrames / qTime; qTime = 0; qFrames = 0;
+  if (fps >= 40) return;
+  qLevel++;
+  if (qLevel === 1) { renderer.setPixelRatio(1); resize(); }
+  if (qLevel === 2) { sun.castShadow = false; }
+}
+
 // ================= LOOP =================
 let lastTs = 0, idleDist = 0;
 function frame(ts) {
@@ -963,6 +1198,7 @@ function frame(ts) {
   if (state === 'title') { dist = idleDist; }
   syncScene(dt, vd);
   renderer.render(scene, camera);
+  if (!window.__t) autoQuality(dt);
 }
 
 // ================= BOOT =================

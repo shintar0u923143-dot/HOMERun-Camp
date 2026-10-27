@@ -11,6 +11,7 @@ A HOMER promotional endless runner in the style of Subway Surfers. Run through t
 | Change lane | Swipe left / right | ← → or A D |
 | Jump (BBQ grill, hammock, chair, cat) | Swipe up | ↑, W or Space |
 | Roll (tent, table, hammock) | Swipe down | ↓ or S |
+| Pause | Tap the ❚❚ button | P or Esc |
 
 Run up the ladder onto the camper van, or onto a kitchen counter, and across the top. Grab the HOMER wagon for a speed boost. One life: three close calls and the bear catches you.
 
@@ -23,7 +24,7 @@ Run up the ladder onto the camper van, or onto a kitchen counter, and across the
   - `wall-<stage>-<side>-0N`: side-view wall and fence tiles
   - `horizon-<stage>`: the far sky (the only layer that stays still)
   - `prop-<side>-<name>`: trees and other props beside the path
-  - `obs-<left|mid|right>-lane-<name>`: each obstacle as seen in each lane
+  - `obs-mid-lane-<name>`: each obstacle seen straight from behind. It's used in all three lanes, because side lanes are only about 5° off-centre with this camera. Turn on `USE_LANE_VIEWS` in `src/game.html` to use separate left/right art.
   - `runner-<lane>-lane-<pose>`: runner poses
   - Anything missing falls back to the older art, so new images can be added a few at a time.
 - `art-sheets/` holds the original Gemini sheets. `art-prompts.html` has the prompts used to make them.

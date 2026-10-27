@@ -1,6 +1,6 @@
 # HOMERun Camp
 
-A HOMER promotional endless runner in the style of Subway Surfers. Run through the campsite, into the house, out to the backyard and back to camp. Dodge camping gear in three lanes, collect leaf coins, keep away from the bear, and make the Top 10.
+A HOMER promotional 3D endless runner in the style of Subway Surfers. Run through the campsite, into the house, out to the backyard and back to camp. Dodge camping gear in three lanes, collect leaf coins, keep away from the bear, and make the Top 10.
 
 **Play:** https://shintar0u923143-dot.github.io/HOMERun-Camp/
 
@@ -17,8 +17,9 @@ Run up the ladder onto the camper van, or onto a kitchen counter, and across the
 
 ## How it's built
 
-- `index.html` is the whole game in one file, with every image built in. This is the file GitHub Pages serves.
-- `src/game.html` is the game source. Images are loaded from `assets/` by file name.
+- `index.html` is the game: real 3D with [three.js](https://threejs.org) (loaded from the jsDelivr CDN), with all art built into the one file. This is the file GitHub Pages serves.
+- `src/game3d.html` is the 3D source. Obstacles, the van, the house front and back doors, the hallway and fences are 3D models built in code. The Gemini art is used for the ground tiles (the 3D floor), the trees beside the path, the horizon and the runner poses.
+- `classic.html` / `src/game.html` is the earlier 2D version, kept for comparison.
 - `assets/` holds the cut-out game art (WebP):
   - `tile-<stage>-0N`: top-down ground tiles that loop and scroll in perspective
   - `wall-<stage>-<side>-0N`: side-view wall and fence tiles
@@ -35,7 +36,8 @@ Run up the ladder onto the camper van, or onto a kitchen counter, and across the
 ```bash
 python3 tools/cut.py art-sheets/sheet-obs-van.jpg sheet-obs-van   # cut a sheet into assets/
 python3 tools/seam.py tile-camp                                   # match ground tile edges after cutting tiles
-python3 tools/build.py                                            # rebuild index.html
+python3 tools/build.py                                            # rebuild index.html (3D)
+python3 tools/build.py classic.html                               # rebuild the 2D classic version
 python3 tools/cut.py --list                                       # every sheet name and what it produces
 ```
 

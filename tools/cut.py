@@ -74,8 +74,20 @@ def save(img, name, out, max_side=None, quality=88):
     print(f'  {name}.webp {img.size[0]}x{img.size[1]}')
 
 
+def strip_grid_lines(a):
+    """Gemini sometimes draws dark divider lines between cells; paint them magenta."""
+    dark = a.max(axis=2) < 80
+    for axis in (0, 1):
+        frac = dark.mean(axis=1 - axis)
+        for i in np.nonzero(frac > 0.6)[0]:
+            for j in range(max(0, i - 2), min(len(frac), i + 3)):
+                if axis == 0: a[j, :] = (255, 0, 255)
+                else: a[:, j] = (255, 0, 255)
+    return a
+
+
 def cut_sprites(im, spec, out):
-    a = np.asarray(im.convert('RGB')).astype(np.float32)
+    a = strip_grid_lines(np.asarray(im.convert('RGB')).astype(np.float32).copy())
     H, W = a.shape[:2]
     alpha = magenta_alpha(a)
     al = Image.fromarray((alpha * 255).astype(np.uint8)).filter(ImageFilter.MinFilter(5)).filter(ImageFilter.GaussianBlur(0.9))

@@ -32,6 +32,7 @@ window.__t = {
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } if (k === 'bear') { bearD = v; lastNear = time; } },
   info() { return { dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, onRamp: player.onRamp, airborne: player.airborne, n: obstacles.length, coins: coinCount }; },
   pause(p) { window.__pause = p; },
+  ev(c) { return eval(c); },
   step(dd) { dist += dd; time += dd / 12; },
   dbg() { const m = obstacles[0].mesh; const b = new THREE.Box3().setFromObject(m); return { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)),
     parts: m.children.slice(0, 8).map(c => [c.geometry && c.geometry.type, c.position.toArray().map(v => +v.toFixed(2)), c.material && c.material.color && c.material.color.getHexString(), c.geometry && c.geometry.parameters && JSON.stringify(c.geometry.parameters)]) }; }

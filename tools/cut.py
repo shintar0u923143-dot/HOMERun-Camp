@@ -34,10 +34,11 @@ SHEETS['sheet-props-living'] = dict(kind='sprites', grid=(2, 3), mirror=True,
 SHEETS['sheet-volleyball'] = dict(kind='sprites', grid=(1, 4), names=['volley-player-1', 'volley-player-2', 'volley-player-3', 'volley-net'])
 # 7-frame animation sheets (2 rows x 4 columns, the 8th cell stays empty). uniform=True crops every frame
 # with the SAME window so the runner never jitters between frames.
+# rolls are cropped tight instead, so the curled-up ball frames sit on the ground rather than hovering
 for _set, _n in (('run', 7), ('jump', 7), ('roll', 7)):
-    SHEETS[f'sheet-runner-{_set}'] = dict(kind='sprites', grid=(2, 4), uniform=True, names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, _n + 1)])
+    SHEETS[f'sheet-runner-{_set}'] = dict(kind='sprites', grid=(2, 4), uniform=_set != 'roll', names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, _n + 1)])
 for _key, _set in (('jump-b', 'jump2'), ('roll-b', 'roll2')):
-    SHEETS[f'sheet-runner-{_key}'] = dict(kind='sprites', grid=(2, 4), uniform=True, names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, 8)])
+    SHEETS[f'sheet-runner-{_key}'] = dict(kind='sprites', grid=(2, 4), uniform=_set != 'roll2', names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, 8)])
 SHEETS['sheet-runner-swim'] = dict(kind='sprites', grid=(1, 4), names=['runner-mid-lane-swim-01', 'runner-mid-lane-swim-02', 'runner-mid-lane-swim-03', 'runner-mid-lane-swim-04'])
 SHEETS['sheet-tiles-camp-a'] = dict(kind='tiles', trail=True, names=['tile-camp-01', 'tile-camp-02'])
 SHEETS['sheet-tiles-camp-b'] = dict(kind='tiles', trail=True, names=['tile-camp-03', 'tile-camp-04'])

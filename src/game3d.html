@@ -904,13 +904,18 @@ function buildRunner() {
   splash.rotation.x = -Math.PI / 2; splash.visible = false; runner.add(splash); runner.userData.splash = splash;
   scene.add(runner);
 }
+// the rolls tumble through their ball frames a few times and only stand up at the very end, so he stays low under the tent and table
+const ROLL_SEQ = { roll: [1, 2, 3, 2, 3, 2, 3, 4, 6, 7], roll2: [1, 2, 3, 4, 3, 4, 3, 4, 5, 7] };
 const pick = (set, u) => { const a = SETS[set]; return a[Math.max(0, Math.min(a.length - 1, Math.floor(u * a.length)))]; };
 function setRunnerPose(dt) {
   const s = runner.userData.sprite; if (!s) return;
   let key, bob = 0;
   const swim = state !== 'title' && inPool(dist) && !player.airborne && player.roll <= 0 && SETS.swim.length;
   if (state === 'title') { runPhase += (dt || 0) * 2.2; key = pick('run', runPhase % 1); }
-  else if (player.roll > 0 && SETS.roll.length) key = pick(SETS[player.rv || 'roll'].length ? (player.rv || 'roll') : 'roll', 1 - player.roll / ROLL_TIME);              // progress through the roll
+  else if (player.roll > 0 && SETS.roll.length) {                                                               // progress through the roll
+    const set = SETS[player.rv || 'roll'].length ? (player.rv || 'roll') : 'roll', u = 1 - player.roll / ROLL_TIME, seq = ROLL_SEQ[set];
+    key = seq && SETS[set].length >= 7 ? SETS[set][seq[Math.min(seq.length - 1, Math.floor(u * seq.length))] - 1] : pick(set, u);
+  }
   else if (player.climb && SETS.climb.length) key = SETS.climb[Math.floor(time * 9) % SETS.climb.length];
   else if (player.airborne && SETS.jump.length) {                                                                // frame follows the arc: rising -> apex -> falling -> landing
     const u = player.vh >= 0 ? 0.5 * (1 - player.vh / JUMP_V) : 0.5 + 0.5 * Math.min(1, -player.vh / JUMP_V);

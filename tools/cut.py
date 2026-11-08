@@ -32,6 +32,12 @@ SHEETS['sheet-props-kitchen'] = dict(kind='sprites', grid=(2, 3), mirror=True,
 SHEETS['sheet-props-living'] = dict(kind='sprites', grid=(2, 3), mirror=True,
     names=['sofa', 'tv-stand', 'vacuum', 'armchair', 'floor-lamp', 'bookshelf'])
 SHEETS['sheet-volleyball'] = dict(kind='sprites', grid=(1, 4), names=['volley-player-1', 'volley-player-2', 'volley-player-3', 'volley-net'])
+# 7-frame animation sheets (2 rows x 4 columns, the 8th cell stays empty). uniform=True crops every frame
+# with the SAME window so the runner never jitters between frames.
+for _set, _n in (('run', 7), ('jump', 7), ('roll', 7)):
+    SHEETS[f'sheet-runner-{_set}'] = dict(kind='sprites', grid=(2, 4), uniform=True, names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, _n + 1)])
+for _key, _set in (('jump-b', 'jump2'), ('roll-b', 'roll2')):
+    SHEETS[f'sheet-runner-{_key}'] = dict(kind='sprites', grid=(2, 4), uniform=True, names=[f'runner-mid-lane-{_set}-0{i}' for i in range(1, 8)])
 SHEETS['sheet-runner-swim'] = dict(kind='sprites', grid=(1, 4), names=['runner-mid-lane-swim-01', 'runner-mid-lane-swim-02', 'runner-mid-lane-swim-03', 'runner-mid-lane-swim-04'])
 SHEETS['sheet-tiles-camp-a'] = dict(kind='tiles', trail=True, names=['tile-camp-01', 'tile-camp-02'])
 SHEETS['sheet-tiles-camp-b'] = dict(kind='tiles', trail=True, names=['tile-camp-03', 'tile-camp-04'])
@@ -89,6 +95,17 @@ def cut_sprites(im, spec, out):
         cy, cx = ys.mean() + sl[0].start, xs.mean() + sl[1].start
         cell = (min(rows - 1, int(cy / (H / rows))), min(cols - 1, int(cx / (W / cols))))
         cells.setdefault(cell, []).append(i)
+    union = None
+    if spec.get('uniform'):          # window = union of all frames, relative to their own cells
+        rel = []
+        for idx in range(len(spec['names'])):
+            cell = (idx // cols, idx % cols)
+            if cell not in cells: continue
+            ys, xs = np.nonzero(np.isin(lab, cells[cell]) & (alpha > 0.02))
+            oy, ox = int(cell[0] * H / rows), int(cell[1] * W / cols)
+            rel.append((ys.min() - oy, ys.max() - oy, xs.min() - ox, xs.max() - ox))
+        if rel:
+            union = (min(r[0] for r in rel) - 3, max(r[1] for r in rel) + 4, min(r[2] for r in rel) - 3, max(r[3] for r in rel) + 4)
     for idx, name in enumerate(spec['names']):
         cell = (idx // cols, idx % cols)
         if cell not in cells:
@@ -97,6 +114,9 @@ def cut_sprites(im, spec, out):
         mask = np.isin(lab, cells[cell]) & (alpha > 0.02)
         ys, xs = np.nonzero(mask)
         y0, y1, x0, x1 = max(0, ys.min() - 3), min(H, ys.max() + 4), max(0, xs.min() - 3), min(W, xs.max() + 4)
+        if union:
+            oy, ox = int(cell[0] * H / rows), int(cell[1] * W / cols)
+            y0, y1, x0, x1 = max(0, oy + union[0]), min(H, oy + union[1]), max(0, ox + union[2]), min(W, ox + union[3])
         al_c = np.where(mask, alpha, 0)[y0:y1, x0:x1]
         rgb_c = rgb[y0:y1, x0:x1]
         if 'climb' in name:
@@ -104,7 +124,7 @@ def cut_sprites(im, spec, out):
         if spec.get('mirror'):
             al_c = strip_ground_line(al_c)          # the thin "ground" bar Gemini draws under props
         ys2, xs2 = np.nonzero(al_c > 0.05)
-        if len(ys2):
+        if len(ys2) and not union:
             al_c = al_c[ys2.min():ys2.max() + 1, xs2.min():xs2.max() + 1]
             rgb_c = rgb_c[ys2.min():ys2.max() + 1, xs2.min():xs2.max() + 1]
         rgba = np.dstack([rgb_c, al_c * 255]).astype(np.uint8)

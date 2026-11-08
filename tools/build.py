@@ -26,10 +26,10 @@ if test and 'game3d' in SRC.get(target, ''):
     out = out.replace("/*TEST_HOOK*/", '''
 window.__t = {
   go(d, lane) { playerName = 'Test'; startGame(); dist = d; lastStage = stageAt(d).i; rebuildChunks(); if (lane !== undefined) { player.lane = lane; player.xw = laneX(lane); camX = player.xw * 0.8; } },
-  spawn(type, lane, ahead) { return addObstacle(type, lane, dist + ahead); },
+  spawn(type, lane, ahead, opts) { return addObstacle(type, lane, dist + ahead, opts || {}); }, train(lane, ahead) { return addVanTrain(lane, dist + ahead); }, setLane(l) { player.lane = l; player.xw = laneX(l); }, key(k) { window.dispatchEvent(new KeyboardEvent('keydown', { key: k })); }, tick(n, dt) { for (let i = 0; i < n; i++) update(dt || 1 / 60); },
   clear() { clearObjects(); },
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } if (k === 'bear') { bearD = v; lastNear = time; } },
-  info() { return { dist, state, h: player.h, lane: player.lane, onRamp: player.onRamp, airborne: player.airborne, n: obstacles.length, coins: coinCount }; },
+  info() { return { sets: Object.fromEntries(Object.entries(SETS).map(([k, v]) => [k, v.length])), pose: runner.userData.sprite && runner.userData.sprite.material.map.image.src.length, dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, onRamp: player.onRamp, airborne: player.airborne, n: obstacles.length, coins: coinCount }; },
   pause(p) { window.__pause = p; },
   step(dd) { dist += dd; time += dd / 12; },
   dbg() { const m = obstacles[0].mesh; const b = new THREE.Box3().setFromObject(m); return { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)),
@@ -44,7 +44,7 @@ window.__t = {
   spawn(type, lane, z) { const o = { type, lane, z, done:false, tight:false, bonus:false, used:false }; obstacles.push(o); addCoinsOn(o); },
   clear() { obstacles = []; coins = []; },
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } },
-  info() { return { dist, state, h: player.h, lane: player.lane, n: obstacles.length }; },
+  info() { return { sets: Object.fromEntries(Object.entries(SETS).map(([k, v]) => [k, v.length])), pose: runner.userData.sprite && runner.userData.sprite.material.map.image.src.length, dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, n: obstacles.length }; },
   pause(p) { window.__pause = p; },
   step(dd) { dist += dd; time += dd / 7; for (const o of obstacles) o.z -= dd; for (const c of coins) c.z -= dd; lastStage = stageIndexAt(dist); }
 };

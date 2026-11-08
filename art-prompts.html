@@ -55,6 +55,15 @@ function runnerSheet(lane) {
     CAM, LOOK, BG
   ].join("\n\n");
 }
+
+function animSheet(what, frames) {
+  return [
+    `Make ONE image that is an animation frame sheet of ${RUNNER}. ${what} It is 7 frames of ONE continuous movement, all seen exactly from BEHIND (face never visible) and centered in their own cell. Same character, same outfit, same size and same lighting in every frame.`,
+    "Layout: a grid of 2 rows and 4 columns, evenly spaced, read left to right then top to bottom. Frames 1 to 4 are the top row, frames 5 to 7 are the bottom row, and the 8th (bottom-right) cell stays EMPTY magenta.\n" + frames,
+    "Important for animation: draw the character at exactly the same scale in every frame (standing height about 75% of the cell height), horizontally centered in the cell, and keep the LOWEST point of the character on the same imaginary baseline in every frame. Do NOT lift the body higher for a jump; the game moves the body itself. No ground line, no shadow, nothing touching the cell edges.",
+    CAM, LOOK, BG
+  ].join("\n\n");
+}
 function propSheet(list, rows, cols, place) {
   return [
     `Make ONE image with ${list.length} separate scenery props arranged in a grid of ${rows} rows and ${cols} columns, evenly spaced, each standing on its own ground line. These stand beside a ${place} path and are seen from the path, from behind and slightly from the side.`,
@@ -104,10 +113,6 @@ const PHASES = [
       text: obstacleSheet("a tall leaf-green dome camping tent with cream stripes, clearly taller than a person, with a big dark open archway at the bottom facing the camera (you could roll through it), ropes and red stakes at the sides.") },
     { name: "sheet-obs-grill", ratio: "16:9", gives: "obs-mid-lane-grill",
       text: obstacleSheet("a round deep-green kettle BBQ grill with the black lid propped open, glowing orange coals on a silver grate, a red handle, a small cream leaf badge on the bowl, and three short green legs. About knee height.") },
-    { name: "sheet-obs-hammock", ratio: "16:9", gives: "obs-mid-lane-hammock",
-      text: obstacleSheet("a cream canvas hammock with green and red stripes hung low between two short green wooden posts with twisted rope, spanning the lane from side to side, about knee height.") },
-    { name: "sheet-obs-canopy", ratio: "16:9", gives: "obs-mid-lane-canopy",
-      text: obstacleSheet("a pop-up camping canopy with a red and cream striped peaked roof on four dark green metal legs with cross braces, tall enough to run underneath, open side facing the camera.") },
     { name: "sheet-runner-mid", ratio: "16:9", gives: "runner-mid-lane: 4 run, jump, roll, 2 climb",
       text: runnerSheet('mid') }
   ]},
@@ -163,6 +168,23 @@ const PHASES = [
       text: [`Make ONE wide image with four poses in a row of ${RUNNER}, swimming freestyle away from the camera, seen from BEHIND and slightly above. Show only his head, hat, shoulders, backpack and arms above a small patch of blue water; the rest of his body is under the water. Same size in every pose.`, "Pose 1: right arm reaching forward. Pose 2: right arm pulling down, small splash. Pose 3: left arm reaching forward. Pose 4: left arm pulling down, small splash.", CAM, LOOK, BG].join("\n\n") },
     { name: "horizon-backyard", ratio: "16:9", gives: "horizon-backyard",
       text: HORIZON("soft blue sky with puffy cream clouds, and hazy distant rooftops and round trees.") }
+  ]},
+  { title: "Phase 5: Runner animation (7 frames each, smooth and cool)", items: [
+    { name: "sheet-runner-run", ratio: "16:9", gives: "runner-mid-lane-run-01 to 07 (replaces the 4 run frames)",
+      text: animSheet("This is the RUNNING cycle: one full stride (right step then left step) in 7 frames, a real sprint with strong arm and leg swing, shoulders twisting against the hips, the hat and backpack bouncing.",
+        "Frame 1: right foot lands ahead, left arm swings forward, right arm back.\nFrame 2: weight drops onto the right leg, knee bends, shoulders dip, backpack drops.\nFrame 3: passing pose, right leg under the body, left leg swinging through, backpack at mid height.\nFrame 4: push-off, right leg extended back, body rising, backpack bounces up, hat lifts a little.\nFrame 5: left foot lands ahead, right arm swings forward, left arm back.\nFrame 6: weight drops onto the left leg, knee bends, shoulders dip, backpack drops.\nFrame 7: passing pose, left leg under the body, right leg swinging through, backpack at mid height.") },
+    { name: "sheet-runner-jump", ratio: "16:9", gives: "runner-mid-lane-jump-01 to 07",
+      text: animSheet("This is the JUMP: a spectacular leap where his bucket hat flies off his head, floats in the air, and he catches it again before landing.",
+        "Frame 1: anticipation crouch, knees deeply bent, arms swung back, hat on head.\nFrame 2: explosive take-off, legs pushing straight, arms swinging up, the hat just starting to lift off his head.\nFrame 3: rising, knees tucking, the hat floating a hand-width above his head, backpack lifting.\nFrame 4: apex, knees tucked high, arms up and out, the hat floating high above his head and tilted.\nFrame 5: starting to fall, legs reaching down, one hand reaching up for the hat which is dropping.\nFrame 6: legs extended toward the ground, his hand catching the hat beside his head.\nFrame 7: landing, deep squat absorbing the impact, hat back on his head or held in his hand, backpack bouncing down.") },
+    { name: "sheet-runner-jump-b", ratio: "16:9", gives: "runner-mid-lane-jump2-01 to 07 (the 'holding the hat' jump, used now and then)",
+      text: animSheet("This is a second JUMP style: a graceful leap where he holds his bucket hat on his head with one hand the whole time (the wind is pushing it).",
+        "Frame 1: anticipation crouch, knees bent, one hand already raised to his hat.\nFrame 2: take-off, legs pushing straight, one arm up pressing the hat on his head, the other arm swinging up.\nFrame 3: rising, knees tucking, one hand holding the hat, backpack lifting.\nFrame 4: apex, a big stretched star-like pose with one hand holding the hat and the other arm out.\nFrame 5: falling, legs reaching down, one hand still on the hat, hat brim flapping.\nFrame 6: legs extended toward the ground, body leaning forward, one hand on the hat.\nFrame 7: landing, deep squat, one hand holding the hat, backpack bouncing down.") },
+    { name: "sheet-runner-roll", ratio: "16:9", gives: "runner-mid-lane-roll-01 to 07",
+      text: animSheet("This is the FORWARD ROLL (a dive roll away from the camera): the bucket hat pops off during the tumble and he catches it as he comes up.",
+        "Frame 1: ducking down, knees bent, arms reaching forward, leaning into the dive.\nFrame 2: hands on the ground, head tucked, backpack rising over his head, hat still on.\nFrame 3: tumbling over, a tight ball with the backpack on top, the hat popping off above him.\nFrame 4: fully curled ball at the middle of the roll, the hat floating above him.\nFrame 5: uncurling, legs swinging down toward the ground, the hat dropping beside him.\nFrame 6: landing in a crouch on both feet, one hand catching the hat.\nFrame 7: rising out of the crouch ready to sprint, hat back on his head, backpack settling.") },
+    { name: "sheet-runner-roll-b", ratio: "16:9", gives: "runner-mid-lane-roll2-01 to 07 (the 'holding the hat' roll, used now and then)",
+      text: animSheet("This is a second FORWARD ROLL style: a cool, tight roll where he keeps one hand pressing his bucket hat onto his head the whole time.",
+        "Frame 1: ducking down, knees bent, one hand pressing the hat on his head, the other arm reaching forward.\nFrame 2: one hand on the ground, head tucked, hat held on, backpack rising.\nFrame 3: tumbling over, tight ball with the backpack on top, one hand clamped on the hat.\nFrame 4: fully curled ball at the middle of the roll, one hand holding the hat.\nFrame 5: uncurling, legs swinging down, hand still on the hat.\nFrame 6: landing in a crouch on both feet, one hand adjusting the hat.\nFrame 7: rising out of the crouch ready to sprint, backpack settling.") }
   ]}
 ];
 

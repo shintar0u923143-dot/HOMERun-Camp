@@ -93,7 +93,8 @@ const L = TW * 2;                // ground tile length
 const NCH = 9;                   // ground chunks kept alive ahead of the runner
 const SPAWN_S = 140;             // how far ahead obstacles appear
 const PH = 0.45;                 // runner half-depth for collisions
-const GRAV = 30, JUMP_V = 9.8;   // jump apex ~1.6, ~0.65 s in the air
+const GRAV = 30, JUMP_V = 10.5;  // jump apex ~1.84, ~0.7 s in the air
+const HOLD = 1.25;               // a runner within this height of a roof edge can still grab on and climb up
 const ROLL_TIME = 0.6;
 const RUNNER_H = 1.9;
 const HALL_X = 5.6, HALL_H = 4.4; // hallway half-width and ceiling height
@@ -119,17 +120,17 @@ const FOG = { outdoor: 0xD3E7E6, house: 0xF1E9DA, backyard: 0xDCEDEF };
 // Obstacles: depth (half, along the run) and rule
 //  jump: be at least `clear` high | roll: be rolling | both: either | ramp: climb on, run across | pass | boost
 const TYPES = {
-  grill:   { half:0.6, kind:'jump', clear:1.05, lethal:true },
+  grill:   { half:0.6, kind:'jump', clear:0.95, lethal:true },
   tent:    { half:1.2, kind:'roll', lethal:true },
-  hammock: { half:0.4, kind:'both', clear:1.35, lethal:true },
-  van:     { half:4.0, kind:'ramp', top:2.25, lethal:false },
+  hammock: { half:0.4, kind:'both', clear:1.1, lethal:true },
+  van:     { half:7.0, kind:'ramp', top:2.25, lad:1.7, lethal:false },
   canopy:  { half:1.1, kind:'pass', lethal:false },
   table:   { half:1.0, kind:'roll', lethal:true },
-  chair:   { half:0.5, kind:'jump', clear:1.15, lethal:true },
-  counter: { half:4.5, kind:'ramp', top:1.45, lethal:false },
-  cat:     { half:0.5, kind:'jump', clear:0.75, lethal:true },
+  chair:   { half:0.5, kind:'jump', clear:1.0, lethal:true },
+  counter: { half:4.5, kind:'ramp', top:1.45, lad:1.2, lethal:false },
+  cat:     { half:0.5, kind:'jump', clear:0.7, lethal:true },
   wagon:   { half:0.8, kind:'boost', lethal:false },
-  float:   { half:0.6, kind:'both', clear:0.95, lethal:true }
+  float:   { half:0.6, kind:'both', clear:0.85, lethal:true }
 };
 const POOLS = {
   outdoor:  ['grill','grill','tent','hammock','van','canopy'],
@@ -137,7 +138,7 @@ const POOLS = {
   backyard: ['grill','tent','hammock','van','canopy','grill']
 };
 const REASON = { grill:'You hit the BBQ grill!', tent:'You got caught by the tent!', hammock:'You got tangled in the hammock!',
-  table:'You bumped the table!', float:'You bonked the pool float!', chair:'You tripped on the chair!', cat:'The house cat tripped you up!' };
+  table:'You bumped the table!', van:'You ran into the camper van!', counter:'You ran into the counter!', float:'You bonked the pool float!', chair:'You tripped on the chair!', cat:'The house cat tripped you up!' };
 
 // ================= RENDERER / SCENE =================
 const canvas = document.getElementById('game');
@@ -375,53 +376,115 @@ function sphere(r, material, opts = {}) {
 }
 const at = (m, x, y, z) => { m.position.set(x, y, z); return m; };
 
+// Camper van designs: top = roof height, lad = length of the step ladder at the back
+const VANS = [
+  { body:0xF2E9D0, stripe:0x8CC63F, trim:0x2F6A2E, top:2.25, lad:1.15, card:true },     // cream, uses the Gemini rear picture
+  { body:0xE8863A, stripe:0xFFF4DC, trim:0x7A3A12, top:2.2,  lad:1.7 },                 // retro orange
+  { body:0x3C7FB8, stripe:0xE9EEF2, trim:0x1D3F5E, top:2.4,  lad:1.9, rack:true },      // blue expedition, roof rack
+  { body:0xF4F1EA, stripe:0xD8463C, trim:0xA82A22, top:2.3,  lad:1.75, boards:true },   // white surf van
+  { body:0x2F6A2E, stripe:0xE8C860, trim:0x143A15, top:2.15, lad:1.6, rack:true }       // forest green
+];
+const VAN_W = 1.85, VAN_LIFT = 0.32;
+// ---- palm tree (trunk bends outward, fronds from a canvas texture) ----
+function frondTex() {
+  return canvasTex(128, 256, (c, w, h) => {
+    c.clearRect(0, 0, w, h);
+    c.strokeStyle = '#2C6B26'; c.lineWidth = 5; c.beginPath(); c.moveTo(w / 2, h); c.lineTo(w / 2, 0); c.stroke();
+    for (let y = 10; y < h; y += 9) {
+      const f = 1 - y / h, ext = w * 0.48 * (0.35 + 0.65 * Math.sin(Math.min(1, (1 - f) * 1.15 + 0.1) * Math.PI * 0.9));
+      c.strokeStyle = (y / 9) % 2 ? '#4FA83E' : '#3C9433'; c.lineWidth = 6;
+      for (const s of [-1, 1]) { c.beginPath(); c.moveTo(w / 2, y); c.lineTo(w / 2 + s * ext, y + 12); c.stroke(); }
+    }
+  }, 'palm-frond');
+}
+function frondGeo() {
+  const N = 8, pos = [], uv = [], idx = [];
+  for (let i = 0; i <= N; i++) {
+    const t = i / N, z = t * 2.6, y = 0.9 * t - 1.35 * t * t, hw = 0.5 * Math.sin(Math.PI * (0.12 + 0.88 * t * 0.92));
+    pos.push(-hw, y, -z, hw, y, -z); uv.push(0, 1 - t, 1, 1 - t);
+    if (i < N) { const a = i * 2; idx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2); }
+  }
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3)); geo.setAttribute('uv', new THREE.Float32BufferAttribute(uv, 2)); geo.setIndex(idx);
+  geo.computeVertexNormals(); return geo;
+}
+const PALM = {};
+function buildPalm(side) {
+  const g = new THREE.Group(), H = 5.6;
+  if (!PALM.trunk) {
+    const curve = new THREE.QuadraticBezierCurve3(new THREE.Vector3(0, 0, 0), new THREE.Vector3(0.12, H * 0.55, 0), new THREE.Vector3(0.7, H, 0));
+    const seg = 14, rad = 8, geoT = new THREE.TubeGeometry(curve, seg, 1, rad, false), p = geoT.attributes.position;
+    for (let i = 0; i <= seg; i++) { const c = curve.getPointAt(i / seg), r = 0.2 - 0.07 * (i / seg); for (let j = 0; j <= rad; j++) { const k = i * (rad + 1) + j; p.setXYZ(k, c.x + (p.getX(k) - c.x) * r, c.y + (p.getY(k) - c.y) * r, c.z + (p.getZ(k) - c.z) * r); } }
+    geoT.computeVertexNormals();
+    PALM.trunk = geoT;
+    PALM.trunkMat = new THREE.MeshStandardMaterial({ map: stripes(['#8A6A45', '#6F5232'], 28, true), roughness: 0.9, side: THREE.DoubleSide });
+    PALM.frondGeo = frondGeo();
+    PALM.frondMat = new THREE.MeshStandardMaterial({ map: frondTex(), alphaTest: 0.4, side: THREE.DoubleSide, roughness: 0.7, emissive: 0xFFFFFF, emissiveMap: frondTex(), emissiveIntensity: 0.55 });
+  }
+  const trunk = new THREE.Mesh(PALM.trunk, PALM.trunkMat); trunk.castShadow = true; trunk.scale.x = side;   // the built curve leans to +x; mirror it for the left tree
+  g.add(trunk);
+  const top = new THREE.Group(); top.position.set(side * 0.7, H, 0); g.add(top);
+  for (let i = 0; i < 9; i++) { const f = new THREE.Mesh(PALM.frondGeo, PALM.frondMat); f.rotation.y = i * (Math.PI * 2 / 9) + side * 0.3; f.scale.setScalar(0.95 + 0.15 * ((i * 7) % 3) / 2); top.add(f); }
+  const nut = mat('coconut', { color: 0x5A3A1E, roughness: 0.7 });
+  for (const [x, z] of [[0.12, 0.1], [-0.12, 0.08], [0.0, -0.14]]) g.add(at(sphere(0.13, nut), side * 0.7 + x, H - 0.18, z));
+  return g;
+}
+
 // ================= 3D OBSTACLES (front = +z, facing the runner/camera) =================
 const BUILD = {
-  van() {
-    const g = new THREE.Group();
-    const len = TYPES.van.half * 2, w = 2.3, bodyH = 1.95, lift = 0.32;
-    const cream = mat('cream', { color: 0xF2E9D0 }), green = mat('stripe', { color: 0x8CC63F }), dark = mat('dkgreen', { color: 0x2F6A2E });
-    g.add(at(box(w, bodyH, len, cream, 0.28), 0, lift + bodyH / 2, 0));
-    g.add(at(box(w + 0.04, 0.32, len + 0.04, green, 0.06), 0, lift + 0.75, 0));
-    g.add(at(box(w - 0.1, 0.12, len - 0.3, dark, 0.05), 0, lift + bodyH - 0.02, 0));
-    const rear = imageCard('obs-mid-lane-van', 2.8);
-    if (rear) {            // the Gemini van picture is the back of the van; the 3D body runs forward from it
-      rear.position.set(0, 0, len / 2 + 0.04); g.add(rear);
-      for (const x of [-w / 2, w / 2]) for (const z of [-len / 2 + 1.1, len / 2 - 2.2]) {
-        const t = at(cyl(0.42, 0.42, 0.3, mat('tyre', { color: 0x1C1C1C, roughness: 0.8 }), 20), x, 0.42, z); t.rotation.z = Math.PI / 2; g.add(t);
-      }
-      const glass = mat('glass', { color: 0x5E8FB0, roughness: 0.15, metalness: 0.3 });
-      for (const x of [-w / 2 - 0.01, w / 2 + 0.01]) g.add(at(box(0.03, 0.55, 1.6, glass, 0.02), x, lift + 1.4, 0));
-      g.add(blobShadow(1.5, len / 2 + 0.4));
-      return castShadows(g);
-    }
-    g.add(at(box(w + 0.1, 0.32, 0.35, dark, 0.1), 0, lift + 0.12, len / 2 - 0.1));          // rear bumper
-    // rear: porthole windows, tail lights, ladder
-    const glass = mat('glass', { color: 0x5E8FB0, roughness: 0.15, metalness: 0.3 }), white = mat('white', { color: 0xFFFFFF });
-    for (const x of [-0.5, 0.5]) {
-      const ring = at(cyl(0.3, 0.3, 0.05, white, 20), x, lift + 1.35, len / 2 + 0.02); ring.rotation.x = Math.PI / 2; g.add(ring);
-      const pane = at(cyl(0.24, 0.24, 0.06, glass, 20), x, lift + 1.35, len / 2 + 0.03); pane.rotation.x = Math.PI / 2; g.add(pane);
-    }
-    const red = mat('red', { color: 0xD32F2F, emissive: 0x400000 });
-    for (const x of [-1.0, 1.0]) g.add(at(box(0.18, 0.34, 0.06, red, 0.04), x, lift + 0.55, len / 2 + 0.02));
-    const ladder = mat('ladder', { color: 0x4E8F4A, metalness: 0.3, roughness: 0.35 });
-    for (const x of [0.25, 0.75]) g.add(at(cyl(0.04, 0.04, bodyH + 0.3, ladder, 8), x, lift + bodyH / 2, len / 2 + 0.12));
-    for (let y = 0.25; y < bodyH + 0.2; y += 0.34) { const r = at(cyl(0.03, 0.03, 0.5, ladder, 8), 0.5, lift + y, len / 2 + 0.12); r.rotation.z = Math.PI / 2; g.add(r); }
-    // roof rack with gear
-    const rail = mat('rail', { color: 0x3E4A3E, metalness: 0.4, roughness: 0.4 });
-    for (const x of [-0.95, 0.95]) g.add(at(box(0.06, 0.06, len * 0.7, rail), x, lift + bodyH + 0.12, 0.3));
-    const gear = [0x2E7D32, 0xC9A66B, 0x4F7F9F, 0xD35F3F];
-    for (let i = 0; i < 4; i++) g.add(at(box(0.6, 0.35, 0.7, mat('gear' + i, { color: gear[i] }), 0.08), (i % 2 ? 0.45 : -0.45), lift + bodyH + 0.18, 1.6 - i * 0.9));
-    // wheels
+  van(vi = 0, len = 12, ladder = true) {
+    const V = VANS[vi], g = new THREE.Group(), w = VAN_W, lift = VAN_LIFT, bodyH = V.top - lift;
+    const body = mat('vb' + vi, { color: V.body, roughness: 0.42 }), stripe = mat('vs' + vi, { color: V.stripe, roughness: 0.4 }), trim = mat('vt' + vi, { color: V.trim, roughness: 0.5 });
+    const glass = mat('glass', { color: 0x5E8FB0, roughness: 0.15, metalness: 0.3 });
     const tyre = mat('tyre', { color: 0x1C1C1C, roughness: 0.8 }), hub = mat('hub', { color: 0xB0B0B0, metalness: 0.6 });
-    for (const x of [-w / 2, w / 2]) for (const z of [len / 2 - 1.1, -len / 2 + 1.1]) {
+    g.add(at(box(w, bodyH, len, body, 0.25), 0, lift + bodyH / 2, 0));
+    g.add(at(box(w + 0.04, 0.3, len + 0.04, stripe, 0.06), 0, lift + 0.7, 0));
+    g.add(at(box(w - 0.12, 0.1, len - 0.3, trim, 0.04), 0, V.top - 0.02, 0));
+    // wheels: a pair at each end and one in the middle of the long ones
+    const wz = [-len / 2 + 1.5, len / 2 - 1.5]; if (len > 11) wz.push(0);
+    for (const x of [-w / 2, w / 2]) for (const z of wz) {
       const t = at(cyl(0.42, 0.42, 0.3, tyre, 20), x, 0.42, z); t.rotation.z = Math.PI / 2; g.add(t);
       const hb = at(cyl(0.2, 0.2, 0.32, hub, 12), x, 0.42, z); hb.rotation.z = Math.PI / 2; g.add(hb);
     }
-    // side windows
-    for (const x of [-w / 2 - 0.01, w / 2 + 0.01]) g.add(at(box(0.03, 0.55, 1.6, glass, 0.02), x, lift + 1.4, len / 2 - 1.9));
-    g.add(blobShadow(1.5, len / 2 + 0.4));
-    return g;
+    // side windows along the body
+    for (let z = -len / 2 + 2.4; z < len / 2 - 2.6; z += 2.5) for (const x of [-w / 2 - 0.01, w / 2 + 0.01]) g.add(at(box(0.03, 0.55, 1.5, glass, 0.02), x, lift + 1.35, z));
+    // front: headlights and grille (the van drives away from the runner)
+    const lamp = mat('lamp', { color: 0xFFF3B0, emissive: 0xFFD860, emissiveIntensity: 0.8 });
+    for (const x of [-0.6, 0.6]) g.add(at(sphere(0.17, lamp), x, lift + 0.6, -len / 2 - 0.02));
+    g.add(at(box(0.9, 0.3, 0.06, trim, 0.02), 0, lift + 0.55, -len / 2 - 0.03));
+    // rear
+    const rear = V.card && imageCard('obs-mid-lane-van', V.top + 0.05);
+    if (rear) { rear.position.set(0, 0, len / 2 + 0.04); g.add(rear); }
+    else {
+      g.add(at(box(w + 0.1, 0.3, 0.35, trim, 0.1), 0, lift + 0.12, len / 2 - 0.05));
+      const white = mat('white', { color: 0xFFFFFF });
+      for (const x of [-0.45, 0.45]) {
+        const ring = at(cyl(0.28, 0.28, 0.05, white, 20), x, lift + 1.35, len / 2 + 0.02); ring.rotation.x = Math.PI / 2; g.add(ring);
+        const pane = at(cyl(0.22, 0.22, 0.06, glass, 20), x, lift + 1.35, len / 2 + 0.03); pane.rotation.x = Math.PI / 2; g.add(pane);
+      }
+      const red = mat('red', { color: 0xD32F2F, emissive: 0x400000 });
+      for (const x of [-0.8, 0.8]) g.add(at(box(0.16, 0.32, 0.06, red, 0.04), x, lift + 0.6, len / 2 + 0.02));
+      if (ladder) {   // slanted step ladder leaning on the back: foot on the ground `lad` metres out, top at the roof edge
+        const lad = V.lad, H = V.top, rail = mat('ladder', { color: 0x4E8F4A, metalness: 0.3, roughness: 0.35 }), tread = mat('tread', { color: 0xE8E2D0, roughness: 0.5 });
+        const len2 = Math.hypot(lad, H), ang = -Math.atan2(lad, H);
+        for (const x of [-0.55, 0.55]) { const r = at(cyl(0.045, 0.045, len2, rail, 8), x, H / 2, len / 2 + lad / 2); r.rotation.x = ang; g.add(r); }
+        const n = Math.round(H / 0.4);
+        for (let i = 1; i <= n; i++) { const f = i / (n + 1); g.add(at(box(1.1, 0.05, 0.3, tread, 0.015), 0, H * (1 - f) + 0.03, len / 2 + lad * f)); }
+      }
+    }
+    // roof extras, kept to the sides so the runner has a clear strip down the middle
+    if (V.rack) {
+      const rl = mat('rail', { color: 0x3E4A3E, metalness: 0.4, roughness: 0.4 });
+      for (const x of [-0.8, 0.8]) g.add(at(box(0.05, 0.05, len * 0.7, rl), x, V.top + 0.18, 0));
+      const gear = [0x2E7D32, 0xC9A66B, 0x4F7F9F, 0xD35F3F];
+      for (let i = 0; i < 5; i++) g.add(at(box(0.4, 0.3, 0.8, mat('gear' + (i % 4), { color: gear[i % 4] }), 0.07), (i % 2 ? 0.7 : -0.7), V.top + 0.17, -len / 2 + 2 + i * (len - 4) / 4));
+    }
+    if (V.boards) {
+      const bc = [0xFFD23F, 0x3FB4E4, 0x6DBE45];
+      for (const [x, i] of [[-0.62, 0], [0.62, 1], [0.0, 2]]) if (i < 2) g.add(at(box(0.34, 0.07, len * 0.55, mat('board' + i, { color: bc[i], roughness: 0.3 }), 0.03), x, V.top + 0.1, -0.5));
+    }
+    g.add(blobShadow(1.25, len / 2 + 0.4));
+    return castShadows(g);
   },
   tent() {
     const g = new THREE.Group();
@@ -454,17 +517,19 @@ const BUILD = {
   },
   hammock() {
     const g = new THREE.Group();
-    const post = mat('post', { color: 0x4C8F3A, roughness: 0.6 });
-    for (const x of [-0.85, 0.85]) g.add(at(cyl(0.08, 0.09, 1.7, post, 10), x, 0.85, 0));
-    const geo = new THREE.PlaneGeometry(1.5, 0.75, 16, 6);
-    const p = geo.attributes.position;
-    for (let i = 0; i < p.count; i++) { const x = p.getX(i), y = p.getY(i); p.setZ(i, 0); p.setY(i, 1.35 - (1 - (x / 0.75) ** 2) * 0.35 + 0); p.setZ(i, y * 0.9); }
+    for (const side of [-1, 1]) { const p = buildPalm(side); p.position.x = side * 1.12; g.add(p); }
+    // the hammock: a striped cloth sagging between the two trunks (top ~1.07 at the middle, bottom ~0.95)
+    const geo = new THREE.PlaneGeometry(1.9, 1.5, 20, 6), pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i); const sag = 1.07 + 0.55 * (x / 0.95) ** 2 + 0.2 * (y / 0.75) ** 2; pos.setXYZ(i, x, sag, y * 0.9); }
     geo.computeVertexNormals();
     const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: stripes(['#F4ECD8', '#F4ECD8', '#7CC243', '#F4ECD8', '#D8463C'], 10), side: THREE.DoubleSide, roughness: 0.7 }));
-    g.add(cloth);
+    cloth.castShadow = true; g.add(cloth);
     const rope = mat('rope', { color: 0xE8DDC0 });
-    for (const x of [-0.8, 0.8]) { const r = at(cyl(0.02, 0.02, 0.3, rope, 4), x, 1.45, 0); g.add(r); }
-    g.add(blobShadow(1.0, 0.45));
+    for (const side of [-1, 1]) for (const z of [-0.38, 0.38]) {
+      const a = new THREE.Vector3(side * 0.95, 1.62, z * 0.9), b = new THREE.Vector3(side * 1.1, 1.62, z * 1.2);
+      const r = at(cyl(0.025, 0.025, a.distanceTo(b), rope, 5), (a.x + b.x) / 2, 1.62, (a.z + b.z) / 2); r.rotation.z = Math.PI / 2; g.add(r);
+    }
+    g.add(blobShadow(1.3, 0.5));
     return g;
   },
   canopy() {
@@ -474,6 +539,9 @@ const BUILD = {
     for (const z of [-1.0, 1.0]) { const b = at(cyl(0.035, 0.035, 2.4, leg, 6), 0, 2.6, z); b.rotation.z = Math.PI / 2; g.add(b); }
     const roof = new THREE.Mesh(new THREE.ConeGeometry(1.95, 0.9, 4, 1, true), new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#F3EBD6'], 16), side: THREE.DoubleSide, roughness: 0.5 }));
     roof.rotation.y = Math.PI / 4; roof.position.y = 3.2; g.add(roof);
+    const val = new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#F3EBD6'], 12), roughness: 0.5, side: THREE.DoubleSide });
+    for (const z of [-1.38, 1.38]) g.add(at(box(2.76, 0.28, 0.03, val), 0, 2.62, z));
+    for (const x of [-1.38, 1.38]) g.add(at(box(0.03, 0.28, 2.76, val), x, 2.62, 0));
     g.add(blobShadow(1.6, 1.3));
     return g;
   },
@@ -506,6 +574,8 @@ const BUILD = {
     g.add(at(box(2.2, 1.1, 0.03, mat('cabdoor', { color: 0xE6D7B8 })), 0, 0.68, len / 2 + 0.01));
     const fruit = [0xD32F2F, 0xC6D62C, 0xF2A33A];
     for (let i = 0; i < 3; i++) g.add(at(sphere(0.16, mat('fruit' + i, { color: fruit[i], roughness: 0.3 })), -0.3 + i * 0.3, 1.6, len / 2 - 0.8));
+    const stepM = mat('step', { color: 0xB98B62, roughness: 0.5 });
+    g.add(at(box(1.3, 0.5, 0.6, stepM, 0.05), 0, 0.25, len / 2 + 0.85)); g.add(at(box(1.3, 0.95, 0.6, stepM, 0.05), 0, 0.475, len / 2 + 0.3));
     g.add(blobShadow(1.4, len / 2 + 0.3));
     return g;
   },
@@ -544,9 +614,9 @@ const BUILD = {
 };
 
 const CARD_H = { grill:1.3, tent:2.85, hammock:1.35, canopy:3.4, table:1.6, chair:1.45, cat:0.9, wagon:1.5, float:1.1, counter:1.6 };
-function buildObstacle(type) {
-  if (type === 'van') return castShadows(BUILD.van());
-  const key = img(`obs-mid-lane-${type}`) ? `obs-mid-lane-${type}` : (type === 'canopy' && img('canopy') ? 'canopy' : null);
+function buildObstacle(type, o) {
+  if (type === 'van') return BUILD.van(o.variant, o.half * 2, o.lad > 0);
+  const key = (type === 'hammock' || type === 'canopy') ? null : (img(`obs-mid-lane-${type}`) ? `obs-mid-lane-${type}` : null);
   if (key && type === 'counter') {   // counter keeps its 3D length behind the picture
     const g = BUILD.counter(); const c = imageCard(key, CARD_H.counter); c.position.z = TYPES.counter.half + 0.05; g.add(c); return castShadows(g);
   }
@@ -556,7 +626,7 @@ function buildObstacle(type) {
     if (type === 'float') g.userData.bob = c;
     return g;
   }
-  return castShadows(BUILD[type]());
+  return type === 'hammock' ? BUILD.hammock() : castShadows(BUILD[type]());
 }
 
 // bear chaser, coin
@@ -811,18 +881,20 @@ function buildHorizon() {
 }
 
 // ================= RUNNER =================
-const RUN_POSES = ['run-01', 'run-02', 'run-03', 'run-04', 'jump', 'roll', 'climb-01', 'climb-02', 'swim-01', 'swim-02', 'swim-03', 'swim-04'];
-let runner, runnerMats = {}, runnerRef = 1;
+// Animation sets: run-01..07, jump-01..07, roll-01..07 (any count from 1 up), plus the older single/few-frame poses as a fallback.
+const SETS = { run: [], jump: [], roll: [], jump2: [], roll2: [], climb: [], swim: [] };   // jump2/roll2 = the 'holding the hat' variants
+let runner, runnerMats = {}, runnerRef = 1, runPhase = 0;
 function buildRunner() {
   const ref = img('runner-mid-lane-run-01');
   runner = new THREE.Group();
   if (ref) {
     runnerRef = ref.naturalHeight;
-    for (const p of RUN_POSES) {
-      const k = `runner-mid-lane-${p}`;
-      if (img(k)) runnerMats[p] = new THREE.SpriteMaterial({ map: texFromImage(k), alphaTest: 0.1, fog: false });
+    const load = k => { if (!img(k)) return false; runnerMats[k] = new THREE.SpriteMaterial({ map: texFromImage(k), alphaTest: 0.1, fog: false }); return true; };
+    for (const set of Object.keys(SETS)) {
+      for (let i = 1; i <= 9; i++) { const k = `runner-mid-lane-${set}-0${i}`; if (load(k)) SETS[set].push(k); else break; }
+      if (!SETS[set].length) { const k = `runner-mid-lane-${set}`; if (load(k)) SETS[set].push(k); }
     }
-    const s = new THREE.Sprite(runnerMats['run-01']); s.center.set(0.5, 0); runner.add(s); runner.userData.sprite = s;
+    const s = new THREE.Sprite(SETS.run[0] ? runnerMats[SETS.run[0]] : null); s.center.set(0.5, 0); runner.add(s); runner.userData.sprite = s;
   } else {
     const body = at(box(0.6, 1.0, 0.4, mat('shirt', { color: 0x4FA54A }), 0.15), 0, 1.0, 0); runner.add(body);
     runner.add(at(sphere(0.25, mat('skin', { color: 0xE9B58E })), 0, 1.75, 0));
@@ -832,19 +904,33 @@ function buildRunner() {
   splash.rotation.x = -Math.PI / 2; splash.visible = false; runner.add(splash); runner.userData.splash = splash;
   scene.add(runner);
 }
-function setRunnerPose() {
+const pick = (set, u) => { const a = SETS[set]; return a[Math.max(0, Math.min(a.length - 1, Math.floor(u * a.length)))]; };
+function setRunnerPose(dt) {
   const s = runner.userData.sprite; if (!s) return;
-  let p;
-  if (player.roll > 0) p = 'roll';
-  else if (player.climb) p = Math.sin(time * 18) > 0 ? 'climb-01' : 'climb-02';
-  else if (player.airborne) p = 'jump';
-  else p = 'run-0' + (1 + Math.floor(time * 10) % 4);
-  if (inPool(dist) && !player.airborne && player.roll <= 0 && runnerMats['swim-01']) p = 'swim-0' + (1 + Math.floor(time * 7) % 4);
-  if (state === 'title') p = 'run-0' + (1 + Math.floor(time * 6) % 4);
-  const m = runnerMats[p] || runnerMats['run-01'];
+  let key, bob = 0;
+  const swim = state !== 'title' && inPool(dist) && !player.airborne && player.roll <= 0 && SETS.swim.length;
+  if (state === 'title') { runPhase += (dt || 0) * 2.2; key = pick('run', runPhase % 1); }
+  else if (player.roll > 0 && SETS.roll.length) key = pick(SETS[player.rv || 'roll'].length ? (player.rv || 'roll') : 'roll', 1 - player.roll / ROLL_TIME);              // progress through the roll
+  else if (player.climb && SETS.climb.length) key = SETS.climb[Math.floor(time * 9) % SETS.climb.length];
+  else if (player.airborne && SETS.jump.length) {                                                                // frame follows the arc: rising -> apex -> falling -> landing
+    const u = player.vh >= 0 ? 0.5 * (1 - player.vh / JUMP_V) : 0.5 + 0.5 * Math.min(1, -player.vh / JUMP_V);
+    key = pick(SETS[player.jv || 'jump'].length ? (player.jv || 'jump') : 'jump', Math.min(0.999, Math.max(0, u)));
+  }
+  else if (swim) { key = SETS.swim[Math.floor(time * 7) % SETS.swim.length]; }
+  else {                                                                                                          // stride cadence rises with speed
+    const cps = 2.4 + Math.max(0, speed - 12) * 0.1;
+    runPhase = (runPhase + (dt || 0) * cps) % 1;
+    key = pick('run', runPhase); bob = Math.abs(Math.sin(runPhase * Math.PI * 2)) * 0.035;
+  }
+  const m = runnerMats[key] || runnerMats[SETS.run[0]];
   s.material = m;
   const im = m.map.image, h = RUNNER_H * im.naturalHeight / runnerRef;
-  s.scale.set(h * im.naturalWidth / im.naturalHeight, h, 1);
+  // squash on landing, stretch on take-off, lean into lane changes
+  const stretch = player.airborne ? Math.min(0.1, Math.max(0, player.vh - 6) * 0.03) : 0;
+  const k = 1 + stretch - (player.sq || 0), kx = 1 - stretch * 0.6 + (player.sq || 0) * 0.8;
+  s.scale.set(h * im.naturalWidth / im.naturalHeight * kx, h * k, 1);
+  m.rotation = state === 'title' ? 0 : Math.max(-0.22, Math.min(0.22, (laneX(player.lane) - player.xw) * 0.2));
+  s.position.y = bob;
 }
 
 // ================= STORAGE / UI =================
@@ -872,7 +958,7 @@ function popup(text, color, yPct = 40) {
 
 // ================= GAME STATE =================
 let state = 'loading', playerName = safeGet(KEY_NAME);
-let player, obstacles = [], coins = [], dist = 0, speed = 12, spawnAcc = 0, nextGap = 30, bonus = 0, coinCount = 0, boostT = 0;
+let player, obstacles = [], coins = [], dist = 0, speed = 12, nextS = 22, bonus = 0, coinCount = 0, boostT = 0;
 let bearD = 1, lastNear = -99, lastStage = 0, time = 0, countdown = 0, deathReason = '', shake = 0, camX = 0, camY = 3.3;
 let bear;
 const score = () => Math.floor(dist * 0.5) + bonus;
@@ -884,8 +970,8 @@ function clearObjects() {
 }
 function reset() {
   clearObjects();
-  player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false };
-  dist = 0; speed = 12; spawnAcc = 0; nextGap = 30; bonus = 0; coinCount = 0; boostT = 0;
+  player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false, lift: false, ladder: false, sq: 0, wasAir: false };
+  dist = 0; speed = 12; nextS = 22; bonus = 0; coinCount = 0; boostT = 0;
   bearD = 1; lastNear = -99; lastStage = 0; time = 0; countdown = 0; shake = 0;
   rebuildChunks();
 }
@@ -897,18 +983,35 @@ function rebuildChunks() {
 }
 
 // ---- actions ----
-function jump() { if (!player.airborne && player.roll <= 0) { player.airborne = true; player.vh = JUMP_V; } }
+function variant(base) { return SETS[base + '2'].length && Math.random() < 0.4 ? base + '2' : base; }   // now and then use the hat-holding version
+function jump() { if (!player.airborne && player.roll <= 0) { player.airborne = true; player.vh = JUMP_V; player.jv = variant('jump'); } }
 function rollDown() {
-  if (player.airborne) { player.vh = Math.min(player.vh, -18); player.roll = ROLL_TIME; return; }   // slam down like Subway Surfers
-  player.roll = ROLL_TIME;
+  if (player.airborne) { player.vh = Math.min(player.vh, -18); player.roll = ROLL_TIME; player.rv = variant('roll'); return; }   // slam down like Subway Surfers
+  player.roll = ROLL_TIME; player.rv = variant('roll');
 }
-function rampAhead(lane) {
-  return obstacles.some(o => { const T = TYPES[o.type]; const rel = o.s - dist; return T.kind === 'ramp' && o.lane === lane && !o.done && Math.abs(rel) < T.half + PH + 1.5; });
+// walkable surface of a ramp-type obstacle (van, counter) under the runner: ladder at the near end, then the roof
+function rampFloor(o, rel) {
+  if (rel > o.half + o.lad || rel < -o.half) return null;
+  if (rel > o.half) return { h: o.top * (1 - (rel - o.half) / o.lad), kind: 'ladder', o };
+  return { h: o.top, kind: 'roof', o };
+}
+function floorAt(lane) {
+  let best = null;
+  for (const o of obstacles) {
+    if (o.lane !== lane || TYPES[o.type].kind !== 'ramp') continue;
+    const f = rampFloor(o, o.s - dist);
+    if (f && (!best || f.h > best.h)) best = f;
+  }
+  return best;
 }
 function moveLane(d) {
   const t = player.lane + d; if (t < 0 || t > 2) return;
-  if (d > 0 && rampAhead(t)) bearAppear();
   player.lane = t;
+  const f = floorAt(t);
+  if (f && f.kind === 'roof' && f.h > player.h + 0.02) {      // swiped sideways into a van / counter
+    if (d > 0 && player.h < f.h - HOLD) bearAppear();
+    player.lift = true;                                       // and hop up onto it
+  }
 }
 const canAct = () => state === 'play' && countdown <= 0;
 
@@ -995,23 +1098,54 @@ function nearBoundary(s) {
   for (let i = 0; i < BOUNDS.length; i++) if (m > BOUNDS[i] - 30 && m < BOUNDS[i] + 14) return true;
   return false;
 }
-function addObstacle(type, lane, s) {
-  const mesh = buildObstacle(type); world.add(mesh);
-  const o = { type, lane, s, mesh, done: false, tight: false, bonus: false, used: false };
+function addObstacle(type, lane, s, opts = {}) {
+  const T = TYPES[type];
+  const o = { type, lane, s, half: opts.half || T.half, top: opts.top || T.top, lad: opts.lad !== undefined ? opts.lad : (T.lad || 0), variant: opts.variant || 0, mesh: null, done: false, tight: false, bonus: false, used: false };
+  o.mesh = buildObstacle(type, o); world.add(o.mesh);
   obstacles.push(o); addCoinsOn(o); return o;
 }
 function addCoin(lane, s, h) { const mesh = buildCoin(); world.add(mesh); coins.push({ lane, s, h, mesh, got: false }); }
-function spawnRow() {
-  const s = dist + SPAWN_S;
-  if (nearBoundary(s)) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return; }
+function trainFits(s, len) { for (let d = -4; d <= len + 14; d += 6) if (nearBoundary(s + d) || inPool(s + d)) return false; return true; }
+// a train of 1-3 camper vans in one lane, gaps small enough to jump (or just run) across
+function addVanTrain(lane, s) {
+  let n = dist < 120 ? 1 : 1 + (Math.random() < 0.5 ? 1 : 0) + (Math.random() < 0.25 ? 1 : 0);
+  const halves = []; for (let i = 0; i < n; i++) halves.push(6 + Math.random() * 2.5);
+  const gaps = []; for (let i = 1; i < n; i++) gaps.push(2.2 + Math.random() * 0.7);
+  const total = () => halves.slice(0, n).reduce((a, h) => a + 2 * h, 0) + gaps.slice(0, n - 1).reduce((a, g) => a + g, 0) + VANS[0].lad;
+  while (n > 1 && !trainFits(s, total())) n--;
+  if (!trainFits(s, total())) return 0;
+  const v0 = Math.floor(Math.random() * VANS.length);
+  let cur = s + VANS[v0].lad;    // leave room for the first ladder
+  let prev = null;
+  for (let i = 0; i < n; i++) {
+    const v = i === 0 ? v0 : 1 + ((v0 + i) % (VANS.length - 1));
+    const V = VANS[v], half = halves[i];
+    const o = addObstacle('van', lane, cur + half, { half, top: V.top, lad: i === 0 ? V.lad : 0, variant: v });
+    if (prev) for (let k = 1; k <= 3; k++) addCoin(lane, prev.s + prev.half + gaps[i - 1] * k / 4, V.top + 0.7 + Math.sin(k / 4 * Math.PI) * 0.7);
+    prev = o; cur = o.s + half + (gaps[i] || 0);
+  }
+  return cur - s;
+}
+// place one row of obstacles at s; returns how far (m) it reaches past s
+function spawnRow(s) {
+  if (nearBoundary(s)) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return 12; }
   const pool = inPool(s) ? ['float', 'float'] : POOLS[stageAt(s).id];
-  if (!inPool(s) && (inPool(s + 12) || inPool(s - 12))) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return; }   // clear pool edges
+  if (!inPool(s) && (inPool(s + 12) || inPool(s - 12))) { for (let k = 0; k < 5; k++) addCoin(1, s + k * 2.4, 0); return 12; }
   const lanes = [0, 1, 2].sort(() => Math.random() - 0.5);
   const count = (dist > 300 && Math.random() < 0.35) ? 2 : 1;
-  const used = [];
-  for (let i = 0; i < count; i++) { addObstacle(pool[Math.floor(Math.random() * pool.length)], lanes[i], s); used.push(lanes[i]); }
+  const used = []; let ext = 1.5;
+  for (let i = 0; i < count; i++) {
+    const type = pool[Math.floor(Math.random() * pool.length)];
+    if (type === 'van') {
+      const e = addVanTrain(lanes[i], s);
+      if (e > 0) { used.push(lanes[i]); ext = Math.max(ext, e); continue; }
+      addObstacle('grill', lanes[i], s); used.push(lanes[i]); continue;
+    }
+    const o = addObstacle(type, lanes[i], s); used.push(lanes[i]); ext = Math.max(ext, o.half * 2);
+  }
   const free = [0, 1, 2].filter(l => !used.includes(l));
   if (free.length && Math.random() < 0.6) { const l = free[Math.floor(Math.random() * free.length)]; for (let k = 0; k < 6; k++) addCoin(l, s + k * 2.2, 0); }
+  return ext;
 }
 function addCoinsOn(o) {
   const T = TYPES[o.type];
@@ -1020,8 +1154,11 @@ function addCoinsOn(o) {
       for (let j = -3; j <= 3; j++) addCoin(o.lane, o.s + j * 1.1, 1.75 - j * j * 0.11); break;
     case 'tent': case 'table':
       for (let j = -2; j <= 2; j++) addCoin(o.lane, o.s + j * 1.1, 0.5); break;
-    case 'van': case 'counter':
-      for (let j = -3; j <= 3; j++) addCoin(o.lane, o.s + j * (T.half / 3.5), T.top + 0.5); break;
+    case 'van': case 'counter': {
+      const n = Math.max(5, Math.floor(o.half * 2 / 2.4));
+      for (let j = 0; j < n; j++) addCoin(o.lane, o.s - o.half + 1 + j * (o.half * 2 - 2) / (n - 1), o.top + 0.5);
+      break;
+    }
     case 'float':
       for (let j = -3; j <= 3; j++) addCoin(o.lane, o.s + j * 1.1, 1.6 - j * j * 0.1); break;
     case 'canopy': case 'wagon':
@@ -1040,30 +1177,38 @@ function update(dt) {
   const si = stageAt(dist);
   if (si.i !== lastStage) { lastStage = si.i; popup(STAGES[si.i].name, '#2E7D32', 30); }
 
-  // runner physics
-  if (player.airborne) {
-    player.vh -= GRAV * dt; player.h += player.vh * dt;
-    if (player.h <= 0) { player.h = 0; player.vh = 0; player.airborne = false; }
+  // runner physics: gravity, then the floor under the runner (ground, ladder or roof)
+  player.climb = false;
+  const f0 = floorAt(player.lane), fh = f0 ? f0.h : 0, onRoof = f0 && f0.kind === 'roof';
+  if (!player.airborne && fh < player.h - 0.02) { player.airborne = true; player.vh = 0; }      // ran off the end of a roof
+  if (player.airborne) { player.vh -= GRAV * dt; player.h += player.vh * dt; }
+  if (onRoof && player.h < fh - 0.001) {
+    if (player.lift || player.ladder || player.h >= fh - HOLD) {                                 // grab the edge and climb up
+      player.h = Math.min(fh, player.h + 14 * dt); player.vh = 0; player.airborne = false; player.climb = true;
+      if (player.h >= fh) player.lift = false;
+    } else { die(REASON[f0.o.type]); if (state !== 'play') return; }
+  } else if (player.airborne) {
+    if (player.h <= fh && player.vh <= 0) { player.h = fh; player.vh = 0; player.airborne = false; }
+  } else {
+    player.h = fh;
+    if (f0 && f0.kind === 'ladder') player.climb = true;
   }
+  player.ladder = !!(f0 && f0.kind === 'ladder' && !player.airborne);
+  player.onRamp = fh > 0 && !player.airborne;
   if (player.roll > 0) player.roll = Math.max(0, player.roll - dt);
   player.xw += (laneX(player.lane) - player.xw) * Math.min(1, dt * 14);
+  // squash and stretch hooks for the runner sprite
+  if (player.wasAir && !player.airborne) player.sq = 0.14;
+  player.wasAir = player.airborne;
+  if (player.sq > 0) player.sq = Math.max(0, player.sq - dt * 0.9);
 
-  spawnAcc += travel;
-  if (spawnAcc >= nextGap) { spawnAcc -= nextGap; spawnRow(); nextGap = Math.max(16, 30 + Math.random() * 10 - dist * 0.01); }
+  while (nextS < dist + SPAWN_S) { if (nextS < dist) nextS = dist + 30; nextS += spawnRow(nextS) + Math.max(14, 20 + Math.random() * 8 - dist * 0.008); }
 
-  player.onRamp = false; player.climb = false;
   for (const o of obstacles) {
     const T = TYPES[o.type], rel = o.s - dist;
-    const inZ = Math.abs(rel) < T.half + PH;
-    if (inZ && o.lane === player.lane && !o.done) {
-      if (T.kind === 'ramp') {
-        const u = (PH + T.half - rel) / (2 * T.half + 2 * PH);
-        const climbEnd = o.type === 'van' ? 0.12 : 0.06;
-        const target = u < climbEnd ? T.top * (u / climbEnd) : T.top;
-        if (player.airborne && player.h > target) { /* falling onto the roof */ if (player.vh < 0 && player.h - target < 0.4) { player.h = target; player.vh = 0; player.airborne = false; } }
-        else { if (u < climbEnd && player.h < target) player.climb = true; player.h = target; player.vh = 0; player.airborne = false; }
-        if (!player.airborne) player.onRamp = true;
-      } else if (T.kind === 'pass') {
+    const inZ = Math.abs(rel) < o.half + PH;
+    if (inZ && o.lane === player.lane && !o.done && T.kind !== 'ramp') {
+      if (T.kind === 'pass') {
         if (!o.bonus) { o.bonus = true; bonus += 25; popup('SHADE +25', '#2E7D32', 66); }
       } else if (T.kind === 'boost') {
         if (!o.used) { o.used = true; boostT = 4; bonus += 30; popup('SPEED UP!', '#8FA81E', 58); o.mesh.visible = false; }
@@ -1075,16 +1220,15 @@ function update(dt) {
         if (T.kind === 'both' && ((player.h >= T.clear && player.h - T.clear < 0.2) || (player.roll > 0 && player.roll < 0.15))) o.tight = true;
       }
     }
-    if (!o.done && rel < -(T.half + PH)) { o.done = true; if (T.lethal && o.tight) { nearMiss(); if (state !== 'play') return; } }
+    if (!o.done && rel < -(o.half + PH)) { o.done = true; if (T.lethal && o.tight) { nearMiss(); if (state !== 'play') return; } }
   }
-  if (!player.onRamp && !player.airborne && player.h > 0) { player.airborne = true; player.vh = 0; }   // run off the end and drop
 
   for (const c of coins) {
     if (!c.got && c.lane === player.lane && Math.abs(c.s - dist) < 0.7 && Math.abs(c.h - player.h) < 1.0) {
       c.got = true; coinCount++; bonus += 10; c.mesh.visible = false;
     }
   }
-  obstacles = obstacles.filter(o => { const keep = o.s + TYPES[o.type].half - dist > -14; if (!keep) world.remove(o.mesh); return keep; });
+  obstacles = obstacles.filter(o => { const keep = o.s + o.half - dist > -14; if (!keep) world.remove(o.mesh); return keep; });
   coins = coins.filter(c => { const keep = !c.got && c.s - dist > -8; if (!keep) world.remove(c.mesh); return keep; });
 
   if (time - lastNear > 2.5) bearD = Math.min(1, bearD + dt * 0.12);
@@ -1113,7 +1257,7 @@ function syncScene(dt, viewDist) {
   const swimming = state !== 'title' && inPool(viewDist);
   const sink = swimming ? (player.roll > 0 ? 1.9 : (player.airborne ? 0 : 0.95)) : 0;
   runner.position.set(player.xw, player.h - sink, 0);
-  setRunnerPose();
+  setRunnerPose(dt);
   const sh = runner.userData.shadow, splash = runner.userData.splash;
   const floorH = rampUnder();
   sh.visible = !swimming;
@@ -1167,10 +1311,7 @@ function syncScene(dt, viewDist) {
   cdUI.style.display = state === 'play' && countdown > 0 ? 'flex' : 'none';
   if (countdown > 0) cdUI.textContent = Math.ceil(countdown / 0.5);
 }
-function rampUnder() {
-  for (const o of obstacles) { const T = TYPES[o.type]; if (T.kind === 'ramp' && o.lane === player.lane && Math.abs(o.s - dist) < T.half) return T.top; }
-  return 0;
-}
+function rampUnder() { const f = floorAt(player.lane); return f ? f.h : 0; }
 
 // ================= AUTO QUALITY =================
 // If a phone can't keep ~40 fps, first drop the render resolution, then the soft shadows.
@@ -1205,7 +1346,7 @@ function frame(ts) {
 loadImages().then(() => {
   resize();
   buildHorizon(); buildRunner(); bear = buildBear(); bear.visible = false; scene.add(bear);
-  player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false };
+  player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false, lift: false, ladder: false, sq: 0, wasAir: false };
   rebuildChunks();
   $('loading').remove();
   showTitle();

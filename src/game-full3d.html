@@ -90,10 +90,10 @@ function loadImages() {
 const img = k => IMG[k] || null;
 
 // ================= WORLD CONSTANTS (world units ~ metres) =================
-const LANE_W = 1.6;
+const LANE_W = 2.0;               // wide lanes so the HOMER products fit side by side
 const laneX = l => (l - 1) * LANE_W;
-const TW = 10.4;                 // ground tile width (the path is the middle half)
-const L = TW * 2;                // ground tile length
+const TW = 12.4;                 // ground tile width (the path is the middle half)
+const L = 20.8;                  // ground tile length
 const NCH = 9;                   // ground chunks kept alive ahead of the runner
 const SPAWN_S = 140;             // how far ahead obstacles appear
 const PH = 0.45;                 // runner half-depth for collisions
@@ -124,11 +124,11 @@ const FOG = { outdoor: 0xD3E7E6, house: 0xF1E9DA, backyard: 0xDCEDEF };
 // Obstacles: depth (half, along the run) and rule
 //  jump: be at least `clear` high | roll: be rolling | both: either | ramp: climb on, run across | pass | boost
 const TYPES = {
-  grill:   { half:0.6, kind:'jump', clear:0.95, lethal:true },
+  grill:   { half:0.45, kind:'jump', clear:0.85, lethal:true },
   tent:    { half:1.2, kind:'roll', lethal:true },
-  hammock: { half:0.4, kind:'both', clear:1.1, lethal:true },
+  hammock: { half:0.45, kind:'both', clear:1.12, lethal:true },
   van:     { half:7.0, kind:'ramp', top:2.25, lad:1.7, lethal:false },
-  canopy:  { half:1.1, kind:'pass', lethal:false },
+  canopy:  { half:1.25, kind:'pass', lethal:false },
   table:   { half:1.0, kind:'roll', lethal:true },
   chair:   { half:0.5, kind:'jump', clear:1.0, lethal:true },
   counter: { half:4.5, kind:'ramp', top:1.45, lad:1.2, lethal:false },
@@ -511,64 +511,108 @@ const BUILD = {
     g.add(blobShadow(1.25, len / 2 + 0.4));
     return castShadows(g);
   },
-  tent() {
+  // HOMER Automatic Camping Tent 2-3 persons: sky-blue hexagonal dome, orange piping, black skirt,
+  // open doors front AND back so you can see daylight through it (you roll straight through)
+  tent(scale = 1, closed = false) {
     const g = new THREE.Group();
-    const dome = sphere(1, new THREE.MeshStandardMaterial({ map: stripes(['#5DB043', '#5DB043', '#F3EBD6'], 12), roughness: 0.55 }), { tl: Math.PI / 2 });
-    dome.scale.set(1.55, 2.6, 1.3); g.add(dome);
-    const arch = new THREE.Mesh(new THREE.CircleGeometry(0.7, 24, 0, Math.PI), mat('archdark', { color: 0x10240F, roughness: 1 }));
-    arch.scale.set(1, 2.0, 1); arch.position.set(0, 0.01, 1.33); g.add(arch);
-    const trim = mat('dkgreen', { color: 0x2F6A2E });
-    const tr = new THREE.Mesh(new THREE.TorusGeometry(0.72, 0.06, 8, 24, Math.PI), trim); tr.scale.set(1, 2.0, 1); tr.position.set(0, 0, 1.34); g.add(tr);
-    const stake = mat('red', { color: 0xD32F2F, emissive: 0x400000 }), rope = mat('rope', { color: 0xE8DDC0 });
-    for (const s of [-1, 1]) {
-      g.add(at(cyl(0.05, 0.05, 0.35, stake, 6), s * 2.0, 0.17, 0.9));
-      const r = at(cyl(0.015, 0.015, 1.9, rope, 4), s * 1.6, 0.9, 0.7); r.rotation.z = s * 0.95; g.add(r);
-    }
-    g.add(blobShadow(1.8, 1.5));
+    const geo = new THREE.SphereGeometry(1, 6, 6, 0, Math.PI * 2, 0, Math.PI / 2);
+    const tex = canvasTex(1024, 512, (c, w, h) => {
+      const gr = c.createLinearGradient(0, 0, 0, h); gr.addColorStop(0, '#5DB8EA'); gr.addColorStop(1, '#2F8FCB'); c.fillStyle = gr; c.fillRect(0, 0, w, h);
+      c.strokeStyle = 'rgba(255,255,255,.18)'; c.lineWidth = 3; for (let i = 0; i < 40; i++) { c.beginPath(); c.moveTo(hash(i) * w, hash(i + 3) * h); c.lineTo(hash(i) * w + 40, hash(i + 3) * h + 25); c.stroke(); }  // fabric creases
+      c.strokeStyle = '#F08A2B'; c.lineWidth = 7; for (let k = 0; k <= 6; k++) { c.beginPath(); c.moveTo(k * w / 6, 0); c.lineTo(k * w / 6, h); c.stroke(); }
+      c.beginPath(); c.moveTo(0, h - 4); c.lineTo(w, h - 4); c.stroke();
+      for (const u of [0.25, 0.75]) {                                   // door openings (front +z and back -z)
+        const x0 = (u - 0.068) * w, x1 = (u + 0.068) * w, y0 = h * 0.4, r = (x1 - x0) / 2;
+        c.save(); c.globalCompositeOperation = 'destination-out'; c.beginPath(); c.moveTo(x0, h); c.lineTo(x0, y0 + r); c.arc(x0 + r, y0 + r, r, Math.PI, 0); c.lineTo(x1, h); c.closePath(); c.fill(); c.restore();
+        c.strokeStyle = '#F08A2B'; c.lineWidth = 8; c.beginPath(); c.moveTo(x0, h); c.lineTo(x0, y0 + r); c.arc(x0 + r, y0 + r, r, Math.PI, 0); c.lineTo(x1, h); c.stroke();
+      }
+    }, 'homer-tent' + (closed ? 'c' : ''));
+    const dome = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, alphaTest: 0.5, side: THREE.DoubleSide, roughness: 0.55, flatShading: true }));
+    dome.scale.set(1.3, 1.75, 1.18); dome.castShadow = true; dome.customDepthMaterial = new THREE.MeshDepthMaterial({ depthPacking: THREE.RGBADepthPacking, map: tex, alphaTest: 0.5 }); g.add(dome);
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.32, 0.14, 6, 1, true), mat('tentskirt', { color: 0x1E2226, roughness: 0.8, side: THREE.DoubleSide })); skirt.position.y = 0.07; skirt.rotation.y = 0; skirt.scale.z = 1.18 / 1.3; g.add(skirt);
+    const floor = new THREE.Mesh(new THREE.CircleGeometry(1.25, 6), mat('tentfloor', { color: 0x8C939A, roughness: 0.9 })); floor.rotation.x = -Math.PI / 2; floor.position.y = 0.03; floor.scale.y = 1.1; g.add(floor);
+    const flap = mat('tentflap', { color: 0xE6EBEF, metalness: 0.3, roughness: 0.35 });
+    for (const z of [1.13, -1.13]) { const f = at(cyl(0.07, 0.08, 1.15, flap, 10), z > 0 ? 0.42 : -0.42, 0.62, z * 0.93); g.add(f); }      // rolled-up door flaps
+    for (let k = 0; k < 6; k++) { const a = k * Math.PI / 3; g.add(at(cyl(0.025, 0.025, 0.25, mat('stake', { color: 0x9A9A9A, metalness: 0.6 }), 5), Math.sin(a) * 1.36, 0.1, Math.cos(a) * 1.22)); }
+    g.add(blobShadow(1.5, 1.35));
+    g.scale.setScalar(scale * 1.12);
     return g;
   },
+  // HOMER Barrel Grill Half Mini: black half-barrel on four legs, side handles, white logo, food grilling
   grill() {
-    const g = new THREE.Group();
-    const green = mat('grillgreen', { color: 0x2E7D32, roughness: 0.3 }), leg = mat('leggreen', { color: 0x6DBE45 });
-    const bowl = sphere(0.5, green, { t0: Math.PI / 2, tl: Math.PI / 2 }); bowl.position.y = 0.75; g.add(bowl);
-    const lid = sphere(0.5, green, { tl: Math.PI / 2 }); lid.position.set(0, 0.78, -0.35); lid.rotation.x = -1.2; g.add(lid);
-    g.add(at(cyl(0.48, 0.48, 0.03, mat('grate', { color: 0x9A9A9A, metalness: 0.7, roughness: 0.3 }), 24), 0, 0.74, 0));
-    g.add(at(cyl(0.42, 0.42, 0.02, mat('coals', { color: 0xFF7A2A, emissive: 0xFF4A00, emissiveIntensity: 1.2 }), 24), 0, 0.7, 0));
-    for (let i = 0; i < 3; i++) { const a = i * 2.09 + 0.5; const l = at(cyl(0.05, 0.06, 0.6, leg, 8), Math.cos(a) * 0.32, 0.3, Math.sin(a) * 0.32); l.rotation.set(Math.sin(a) * 0.2, 0, -Math.cos(a) * 0.2); g.add(l); }
-    g.add(at(box(0.32, 0.06, 0.08, mat('red', { color: 0xD32F2F, emissive: 0x400000 }), 0.02), 0, 1.25, -0.75));
-    g.add(at(box(0.16, 0.12, 0.02, mat('badge', { color: 0xF3EBD6 }), 0.02), 0, 0.55, 0.48));
-    g.add(blobShadow(0.6, 0.6));
+    const g = new THREE.Group(), blk = mat('grillblack', { color: 0x1E1E1E, roughness: 0.45, metalness: 0.35 }), r = 0.3, yc = 0.66, len = 1.0;
+    const barrel = new THREE.Mesh(new THREE.CylinderGeometry(r, r, len, 22, 1, true, Math.PI, Math.PI), new THREE.MeshStandardMaterial({ color: 0x1E1E1E, roughness: 0.45, metalness: 0.35, side: THREE.DoubleSide }));
+    barrel.rotation.z = Math.PI / 2; barrel.position.y = yc; g.add(barrel);
+    for (const sx of [-1, 1]) { const e = new THREE.Mesh(new THREE.CircleGeometry(r, 22, Math.PI, Math.PI), blk); e.rotation.y = sx * Math.PI / 2; e.position.set(sx * len / 2, yc, 0); g.add(e);
+      const hd = new THREE.Mesh(new THREE.TorusGeometry(0.12, 0.018, 6, 14, Math.PI), blk); hd.rotation.y = Math.PI / 2; hd.position.set(sx * (len / 2 + 0.02), yc - 0.04, 0); hd.rotation.z = 0; g.add(hd); }
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) { const l = at(cyl(0.022, 0.022, 0.62, blk, 8), sx * 0.42, 0.29, sz * 0.13); l.rotation.set(-sz * 0.12, 0, sx * 0.1); g.add(l);
+      g.add(at(cyl(0.028, 0.028, 0.05, mat('rubberfoot', { color: 0x333333 }), 8), sx * 0.45, 0.025, sz * 0.17)); }
+    g.add(at(box(len, 0.02, 0.1, blk), 0, yc - r + 0.05, 0));                                            // brace
+    const steel = mat('grate', { color: 0xB9BDC1, metalness: 0.8, roughness: 0.3 });
+    for (let i = -11; i <= 11; i++) g.add(at(box(0.012, 0.012, 2 * r - 0.02, steel), i * 0.044, yc + 0.012, 0));
+    for (const z of [-0.2, 0, 0.2]) g.add(at(box(len - 0.02, 0.014, 0.014, steel), 0, yc + 0.005, z));
+    g.add(at(box(len - 0.1, 0.06, 0.4, mat('coals', { color: 0xFF7A2A, emissive: 0xFF4A00, emissiveIntensity: 3.0 })), 0, yc - 0.12, 0));
+    // food on the grate: sausages, corn and two skewers
+    const saus = mat('sausage', { color: 0xA0442A, roughness: 0.4 }), corn = mat('corn', { color: 0xF2C531, roughness: 0.5 }), grill = mat('grillmark', { color: 0x4A2A16 });
+    for (let i = 0; i < 3; i++) { const s = at(capsule(0.035, 0.18, saus), -0.32 + i * 0.1, yc + 0.05, 0.05); s.rotation.x = Math.PI / 2; g.add(s); }
+    for (let i = 0; i < 2; i++) { const c = at(cyl(0.045, 0.045, 0.24, corn, 10), 0.02 + i * 0.13, yc + 0.06, -0.02); c.rotation.x = Math.PI / 2; g.add(c); }
+    for (let k = 0; k < 2; k++) { const sk = new THREE.Group(); sk.position.set(0.32 + k * 0.08, yc + 0.06, 0); g.add(sk);
+      const st = cyl(0.006, 0.006, 0.5, mat('stick', { color: 0xD9B07A }), 4); st.rotation.x = Math.PI / 2; sk.add(st);
+      [0x2E9E3A, 0xD32F2F, 0xA0442A, 0xF2C531, 0x2E9E3A].forEach((col, j) => sk.add(at(new THREE.Mesh(new THREE.BoxGeometry(0.05, 0.05, 0.05), mat('kebab' + col, { color: col, roughness: 0.5 })), 0, 0, -0.16 + j * 0.08))); }
+    // white HOMER logo on the front
+    const logo = new THREE.Mesh(new THREE.PlaneGeometry(0.42, 0.1), cachedMat('logowhite', () => new THREE.MeshBasicMaterial({ map: canvasTex(512, 128, (c, w, h) => { const lg = img('homer-logo-a'); if (lg) { c.drawImage(lg, 6, 6, w - 12, h - 12); c.globalCompositeOperation = 'source-in'; c.fillStyle = '#FFFFFF'; c.fillRect(0, 0, w, h); } else { c.fillStyle = '#fff'; c.font = '700 90px Arial'; c.textAlign = 'center'; c.textBaseline = 'middle'; c.fillText('HOMER', w / 2, h / 2); } }, 'logowhite'), transparent: true, toneMapped: false })));
+    logo.position.set(0, yc - 0.14, Math.sqrt(r * r - 0.14 * 0.14) + 0.006); logo.rotation.x = -Math.asin(0.14 / r); g.add(logo);
+    g.add(blobShadow(0.65, 0.35));
+    g.userData.smoke = true;
+    g.scale.setScalar(1.2);
     return g;
   },
+  // HOMER Hammock Set (single, blue): parachute nylon gathered at the ends, black tree straps and carabiners,
+  // slung between two palm trees
   hammock() {
-    const g = new THREE.Group();
-    for (const side of [-1, 1]) { const p = buildPalm(side); p.position.x = side * 1.12; g.add(p); }
-    // the hammock: a striped cloth sagging between the two trunks (top ~1.07 at the middle, bottom ~0.95)
-    const geo = new THREE.PlaneGeometry(1.9, 1.5, 20, 6), pos = geo.attributes.position;
-    for (let i = 0; i < pos.count; i++) { const x = pos.getX(i), y = pos.getY(i); const sag = 1.07 + 0.55 * (x / 0.95) ** 2 + 0.2 * (y / 0.75) ** 2; pos.setXYZ(i, x, sag, y * 0.9); }
-    geo.computeVertexNormals();
-    const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: stripes(['#F4ECD8', '#F4ECD8', '#7CC243', '#F4ECD8', '#D8463C'], 10), side: THREE.DoubleSide, roughness: 0.7 }));
-    cloth.castShadow = true; g.add(cloth);
-    const rope = mat('rope', { color: 0xE8DDC0 });
-    for (const side of [-1, 1]) for (const z of [-0.38, 0.38]) {
-      const a = new THREE.Vector3(side * 0.95, 1.62, z * 0.9), b = new THREE.Vector3(side * 1.1, 1.62, z * 1.2);
-      const r = at(cyl(0.025, 0.025, a.distanceTo(b), rope, 5), (a.x + b.x) / 2, 1.62, (a.z + b.z) / 2); r.rotation.z = Math.PI / 2; g.add(r);
+    const g = new THREE.Group(), TX = 1.32;
+    for (const side of [-1, 1]) { const p = buildPalm(side); p.position.x = side * TX; g.add(p); }
+    const tex = canvasTex(512, 256, (c, w, h) => {
+      c.fillStyle = '#2E3474'; c.fillRect(0, 0, w, h);
+      c.fillStyle = '#525CB0'; c.fillRect(0, 0, w, h * 0.13); c.fillRect(0, h * 0.87, w, h * 0.13);
+      for (let i = 0; i < 46; i++) { const y = hash(i) * h; c.strokeStyle = i % 2 ? 'rgba(255,255,255,.08)' : 'rgba(0,0,20,.18)'; c.lineWidth = 2 + hash(i + 2) * 3; c.beginPath(); c.moveTo(0, y); c.bezierCurveTo(w * 0.3, y + (hash(i + 4) - 0.5) * 30, w * 0.7, y - (hash(i + 5) - 0.5) * 30, w, y); c.stroke(); }
+    }, 'hammock-navy');
+    const geo = new THREE.PlaneGeometry(2.1, 1.0, 28, 10), pos = geo.attributes.position;
+    for (let i = 0; i < pos.count; i++) {
+      const x = pos.getX(i), v = pos.getY(i), u = x / 1.05, wd = 0.06 + 0.94 * Math.pow(Math.max(0, Math.cos(u * Math.PI / 2)), 0.65);
+      const z = v * wd * 1.1, y = 1.0 + 0.55 * u * u + 0.32 * (v * 2) ** 2 * wd;
+      pos.setXYZ(i, x, y, z);
     }
-    g.add(blobShadow(1.3, 0.5));
+    geo.computeVertexNormals();
+    const cloth = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: tex, side: THREE.DoubleSide, roughness: 0.5 })); cloth.castShadow = true; g.add(cloth);
+    g.userData.sway = cloth;
+    const strap = mat('strap', { color: 0x161616, roughness: 0.7 }), crab = mat('carabiner', { color: 0x2B2B2B, metalness: 0.7, roughness: 0.3 });
+    for (const sd of [-1, 1]) {
+      // gathered end knot, carabiner, strap up to the trunk and a strap wrapped around it
+      g.add(at(sphere(0.06, mat('knot', { color: 0x262B66 })), sd * 1.06, 1.58, 0));
+      const cb = new THREE.Mesh(new THREE.TorusGeometry(0.05, 0.012, 6, 14), crab); cb.scale.y = 1.6; cb.position.set(sd * 1.13, 1.64, 0); g.add(cb);
+      const s = at(box(0.2, 0.025, 0.04, strap), sd * 1.2, 1.7, 0); s.rotation.z = sd * -0.5; g.add(s);
+      const wrap = new THREE.Mesh(new THREE.TorusGeometry(0.205, 0.03, 6, 16), strap); wrap.rotation.x = Math.PI / 2; wrap.position.set(sd * (TX + 0.03), 1.76, 0); g.add(wrap);
+    }
+    g.add(blobShadow(1.4, 0.55));
     return g;
   },
+  // HOMER white pop-up canopy: peaked white roof, four straight legs, scissor (X) frame under the roof
   canopy() {
-    const g = new THREE.Group();
-    const leg = mat('canopyleg', { color: 0x2F6A2E, metalness: 0.3 });
-    for (const x of [-1.2, 1.2]) for (const z of [-1.0, 1.0]) g.add(at(cyl(0.05, 0.05, 2.8, leg, 8), x, 1.4, z));
-    for (const z of [-1.0, 1.0]) { const b = at(cyl(0.035, 0.035, 2.4, leg, 6), 0, 2.6, z); b.rotation.z = Math.PI / 2; g.add(b); }
-    const roof = new THREE.Mesh(new THREE.ConeGeometry(1.95, 0.9, 4, 1, true), new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#F3EBD6'], 16), side: THREE.DoubleSide, roughness: 0.5 }));
-    roof.rotation.y = Math.PI / 4; roof.position.y = 3.2; g.add(roof);
-    const val = new THREE.MeshStandardMaterial({ map: stripes(['#D8463C', '#F3EBD6'], 12), roughness: 0.5, side: THREE.DoubleSide });
-    for (const z of [-1.38, 1.38]) g.add(at(box(2.76, 0.28, 0.03, val), 0, 2.62, z));
-    for (const x of [-1.38, 1.38]) g.add(at(box(0.03, 0.28, 2.76, val), x, 2.62, 0));
-    const cs = new THREE.Mesh(new THREE.PlaneGeometry(1.2, 0.6), brandMat('')); cs.position.set(0, 2.62, 1.4); g.add(cs);
-    g.add(blobShadow(1.6, 1.3));
+    const g = new THREE.Group(), H = 2.95, S = 1.4;
+    const white = mat('canopywhite', { color: 0xF4F6F8, roughness: 0.6 }), frame = mat('canopyframe', { color: 0xDADFE4, metalness: 0.5, roughness: 0.35 });
+    for (const x of [-S, S]) for (const z of [-S, S]) { g.add(at(box(0.05, H, 0.05, frame), x, H / 2, z)); g.add(at(box(0.12, 0.02, 0.12, frame), x, 0.01, z)); }
+    for (const [ax, fixed] of [['x', -S], ['x', S], ['z', -S], ['z', S]]) for (const sgn of [-1, 1]) {   // X-frame on all four sides
+      const bar = box(0.025, Math.hypot(2 * S, 0.35), 0.025, frame); bar.position.set(ax === 'z' ? 0 : fixed, H - 0.2, ax === 'z' ? fixed : 0);
+      if (ax === 'z') bar.rotation.z = Math.PI / 2 + sgn * Math.atan2(0.35, 2 * S); else { bar.rotation.x = Math.PI / 2 + sgn * Math.atan2(0.35, 2 * S); }
+      g.add(bar);
+    }
+    const roof = new THREE.Mesh(new THREE.ConeGeometry(S * Math.SQRT2 * 1.06, 0.75, 4, 1, true), new THREE.MeshStandardMaterial({ color: 0xF4F6F8, roughness: 0.6, side: THREE.DoubleSide, flatShading: true }));
+    roof.rotation.y = Math.PI / 4; roof.position.y = H + 0.37; roof.castShadow = true; g.add(roof);
+    for (const z of [-S * 1.06, S * 1.06]) g.add(at(box(2 * S * 1.06, 0.14, 0.02, white), 0, H - 0.06, z));
+    for (const x of [-S * 1.06, S * 1.06]) g.add(at(box(0.02, 0.14, 2 * S * 1.06, white), x, H - 0.06, 0));
+    const cs = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.4), brandMat('')); cs.position.set(0, H + 0.16, S * 1.06 + 0.02); cs.rotation.x = -0.35; g.add(cs);
+    g.add(blobShadow(1.7, 1.7));
     return g;
   },
   table() {
@@ -726,9 +770,7 @@ const P3 = {
     const glow = new THREE.Mesh(new THREE.CircleGeometry(1.6, 24), new THREE.MeshBasicMaterial({ color: 0xFFB050, transparent: true, opacity: 0.22, depthWrite: false }));
     glow.rotation.x = -Math.PI / 2; glow.position.y = 0.03; g.add(glow);
     return g; },
-  'tent-side'(h, v) { const g = new THREE.Group(), cols = [0xE8863A, 0x3C7FB8, 0xD8463C, 0xC6D62C];
-    const t = new THREE.Mesh(new THREE.ConeGeometry(1.4, 1.8, 4, 1), fmat('stent' + (v % 4), cols[v % 4])); t.rotation.y = Math.PI / 4; t.position.y = 0.9; t.scale.z = 1.4; g.add(t);
-    return g; },
+  'tent-side'(h, v) { const t = BUILD.tent(0.85); t.rotation.y = (hash(v) - 0.5) * 1.2; return t; },
   'flower-pot'(h, v) { const g = new THREE.Group(); g.add(at(cyl(0.28, 0.2, 0.5, fmat('pot', 0xB85C38), 10), 0, 0.25, 0));
     const cols = [0xD32F2F, 0xFFD23F, 0xFFFFFF, 0xE85FA0]; for (let i = 0; i < 7; i++) g.add(at(sphere(0.08, fmat('fl' + (i % 4), cols[i % 4], { flatShading: false })), (hash(i + v) - 0.5) * 0.4, 0.6 + hash(i * 3) * 0.25, (hash(i * 7 + v) - 0.5) * 0.4));
     g.add(at(ico(0.25, fmat('bush', 0x4FA83E)), 0, 0.55, 0)); return g; },
@@ -1017,7 +1059,7 @@ function buildChunk(n) {
       let name = props[Math.floor(h1 * props.length)];
       if (pool && i < 3) name = i % 2 ? 'beach-umbrella' : 'sunbed';            // poolside loungers
       const near = pool && i < 3;
-      const minX = near ? POOL_W / 2 + 1.0 : (id === 'backyard' ? 6.0 : 6.4);
+      const minX = near ? POOL_W / 2 + 1.0 : TW / 2 + 1.0;
       const spread = near ? 1.2 : (id === 'backyard' ? 9 : 10);
       const pc = propCard(name, side, PROP_H[name] * (0.85 + h3 * 0.3));
       if (!pc) continue;
@@ -1638,6 +1680,10 @@ function syncScene(dt, viewDist) {
   if (waterTex) { waterTex.offset.y = (waterTex.offset.y + dt * 0.12) % 1; waterTex.offset.x = Math.sin(time * 0.7) * 0.03; }
   for (const o of obstacles) if (o.mesh.userData.bob) o.mesh.userData.bob.position.y = (o.type === 'float' && o.mesh.userData.bob.isMesh && o.mesh.userData.bob.geometry.type === 'TorusGeometry' ? 0.15 : -0.35) + Math.sin(time * 3 + o.s) * 0.08;
   volleyBalls.forEach((b, i) => { const t = (time * 0.55 + i * 0.3) % 1, dir = Math.floor(time * 0.55 + i * 0.3) % 2; const u = dir ? t : 1 - t; b.position.set(-2.2 + 4.6 * u, 1.9 + Math.sin(t * Math.PI) * 2.4, 0.3 - 0.7 * u); });
+  for (const o of obstacles) if (o.type === 'grill' && o.s - viewDist < 70 && o.s - viewDist > -6) {
+    o.smokeT = (o.smokeT || 0) - dt;
+    if (o.smokeT <= 0) { o.smokeT = 0.14; spawnPart({ x: laneX(o.lane) + (Math.random() - 0.5) * 0.6, s: o.s, y: 0.85, vy: 0.9 + Math.random() * 0.5, vx: (Math.random() - 0.5) * 0.3, size: 0.3, grow: 3.2, life: 1.5, color: 0xE4E4E4, op: 0.32 }); }
+  }
   updateParts(dt, viewDist); updateAmbient(dt, stageAt(viewDist).id);
   rim.position.set(camX + 3, 8, -16); rim.target.position.set(camX, 1, 0);
   FLAMES.forEach((f, i) => { const k = 1 + Math.sin(time * 17 + i * 2.1) * 0.12 + Math.sin(time * 29 + i) * 0.06; f.scale.set(1 / k, k, 1 / k); });

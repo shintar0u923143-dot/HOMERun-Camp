@@ -6,7 +6,7 @@ python3 tools/build.py --test [dir ...] -> test.html  (assets/ plus extra folder
 import base64, json, sys, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
-SRC = {'index.html': 'game3d.html', 'classic.html': 'game.html'}
+SRC = {'index.html': 'game3d.html', 'classic.html': 'game.html', 'full3d.html': 'game-full3d.html'}
 target = next((a for a in sys.argv[1:] if a.endswith('.html')), 'index.html')
 src = (root / 'src' / SRC.get(target, 'game3d.html')).read_text()
 MIME = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
@@ -19,9 +19,10 @@ for d in dirs:
         if p.suffix.lower() in MIME:
             assets[p.stem] = 'data:%s;base64,%s' % (MIME[p.suffix.lower()], base64.b64encode(p.read_bytes()).decode())
 
+if 'full3d' in target: assets = {}          # the full-3D build uses no pictures at all
 out = src.replace('/*ASSETS*/{}', json.dumps(assets))
 
-if test and 'game3d' in SRC.get(target, ''):
+if test and ('game3d' in SRC.get(target, '') or 'full3d' in target):
     out = out.replace('https://cdn.jsdelivr.net/npm/three@0.160.0/', '/three/')
     out = out.replace("/*TEST_HOOK*/", '''
 window.__t = {
@@ -29,7 +30,7 @@ window.__t = {
   spawn(type, lane, ahead, opts) { return addObstacle(type, lane, dist + ahead, opts || {}); }, train(lane, ahead) { return addVanTrain(lane, dist + ahead); }, setLane(l) { player.lane = l; player.xw = laneX(l); }, key(k) { window.dispatchEvent(new KeyboardEvent('keydown', { key: k })); }, tick(n, dt) { for (let i = 0; i < n; i++) update(dt || 1 / 60); },
   clear() { clearObjects(); },
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } if (k === 'bear') { bearD = v; lastNear = time; } },
-  info() { return { sets: Object.fromEntries(Object.entries(SETS).map(([k, v]) => [k, v.length])), pose: runner.userData.sprite && runner.userData.sprite.material.map.image.src.length, dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, onRamp: player.onRamp, airborne: player.airborne, n: obstacles.length, coins: coinCount }; },
+  info() { return { dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, onRamp: player.onRamp, airborne: player.airborne, n: obstacles.length, coins: coinCount }; },
   pause(p) { window.__pause = p; },
   step(dd) { dist += dd; time += dd / 12; },
   dbg() { const m = obstacles[0].mesh; const b = new THREE.Box3().setFromObject(m); return { min: b.min.toArray().map(v => +v.toFixed(2)), max: b.max.toArray().map(v => +v.toFixed(2)),
@@ -44,7 +45,7 @@ window.__t = {
   spawn(type, lane, z) { const o = { type, lane, z, done:false, tight:false, bonus:false, used:false }; obstacles.push(o); addCoinsOn(o); },
   clear() { obstacles = []; coins = []; },
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } },
-  info() { return { sets: Object.fromEntries(Object.entries(SETS).map(([k, v]) => [k, v.length])), pose: runner.userData.sprite && runner.userData.sprite.material.map.image.src.length, dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, n: obstacles.length }; },
+  info() { return { dist, state, nextS, h: player.h, vh: player.vh, lift: player.lift, obs: obstacles.map(o => [o.type, o.lane, +(o.s - dist).toFixed(1)]).slice(0, 8), lane: player.lane, n: obstacles.length }; },
   pause(p) { window.__pause = p; },
   step(dd) { dist += dd; time += dd / 7; for (const o of obstacles) o.z -= dd; for (const c of coins) c.z -= dd; lastStage = stageIndexAt(dist); }
 };

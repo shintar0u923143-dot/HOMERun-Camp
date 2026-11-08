@@ -6,9 +6,9 @@ python3 tools/build.py --test [dir ...] -> test.html  (assets/ plus extra folder
 import base64, json, sys, pathlib
 
 root = pathlib.Path(__file__).resolve().parent.parent
-SRC = {'index.html': 'game3d.html', 'classic.html': 'game.html', 'full3d.html': 'game-full3d.html'}
+SRC = {'index.html': 'game-full3d.html', 'full3d.html': 'game-full3d.html', 'cards.html': 'game3d.html', 'classic.html': 'game.html'}
 target = next((a for a in sys.argv[1:] if a.endswith('.html')), 'index.html')
-src = (root / 'src' / SRC.get(target, 'game3d.html')).read_text()
+src = (root / 'src' / SRC.get(target, 'game-full3d.html')).read_text()
 MIME = {'.webp': 'image/webp', '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg'}
 
 test = '--test' in sys.argv
@@ -19,10 +19,10 @@ for d in dirs:
         if p.suffix.lower() in MIME:
             assets[p.stem] = 'data:%s;base64,%s' % (MIME[p.suffix.lower()], base64.b64encode(p.read_bytes()).decode())
 
-if 'full3d' in target: assets = {}          # the full-3D build uses no pictures at all
+if 'full3d' in SRC.get(target, ''): assets = {}          # the full-3D build uses no pictures at all
 out = src.replace('/*ASSETS*/{}', json.dumps(assets))
 
-if test and ('game3d' in SRC.get(target, '') or 'full3d' in target):
+if test and ('game3d' in SRC.get(target, '') or 'full3d' in SRC.get(target, '')):
     out = out.replace('https://cdn.jsdelivr.net/npm/three@0.160.0/', '/three/')
     out = out.replace("/*TEST_HOOK*/", '''
 window.__t = {

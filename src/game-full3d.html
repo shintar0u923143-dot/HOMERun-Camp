@@ -101,7 +101,7 @@ const GRAV = 30, JUMP_V = 10.5;  // jump apex ~1.84, ~0.7 s in the air
 const HOLD = 1.25;               // a runner within this height of a roof edge can still grab on and climb up
 const ROLL_TIME = 0.6;
 const RUNNER_H = 1.9;
-const HALL_X = 5.6, HALL_H = 4.4; // hallway half-width and ceiling height
+const HALL_X = 5.6, HALL_H = 6.6, WALL_H = 4.4; // hallway half-width, ceiling height, height of the papered/tiled lower wall
 
 // Stage loop, lengths in whole tiles so stage changes land on tile edges
 const STAGES = [
@@ -775,18 +775,26 @@ function buildBear() {
   g.scale.setScalar(0.72);
   return g;
 }
-// coins are HOMER leaf emblems: the logo on both faces, a deep-green rim
-const coinGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.07, 32);
-let coinMats = null;
+// coins are HOMER leaf emblems: a crisp 1024px emblem inset in a rounded, polished gold rim
+let coinParts = null;
 function buildCoin() {
-  if (!coinMats) {
+  if (!coinParts) {
+    const prof = [[0.33, 0.028], [0.345, 0.05], [0.37, 0.058], [0.395, 0.045], [0.405, 0.0], [0.395, -0.045], [0.37, -0.058], [0.345, -0.05], [0.33, -0.028]].map(([x, y]) => new THREE.Vector2(x, y));
+    const rimGeo = new THREE.LatheGeometry(prof, 48);
+    const faceGeo = new THREE.CircleGeometry(0.335, 48);
+    const uv = faceGeo.attributes.uv; for (let i = 0; i < uv.count; i++) uv.setXY(i, 0.5 + (uv.getX(i) - 0.5) * 0.94, 0.5 + (uv.getY(i) - 0.5) * 0.94);
     const face = img('homer-emblem') ? texFromImage('homer-emblem') : null;
     const faceM = face ? new THREE.MeshBasicMaterial({ map: face, toneMapped: false }) : new THREE.MeshStandardMaterial({ color: 0x6DBE45, emissive: 0x2E7D32, emissiveIntensity: 0.6 });   // true logo colours
-    const rimM = new THREE.MeshStandardMaterial({ color: 0x2E7D32, emissive: 0x1E5A22, emissiveIntensity: 0.8, metalness: 0.4, roughness: 0.3 });
-    coinMats = [rimM, faceM, faceM];
+    const rimM = new THREE.MeshStandardMaterial({ color: 0xF2C94C, emissive: 0x6B4A00, emissiveIntensity: 0.35, metalness: 0.9, roughness: 0.22, envMapIntensity: 1.4 });
+    coinParts = { rimGeo, faceGeo, faceM, rimM };
   }
-  const g = new THREE.Group();
-  const c = new THREE.Mesh(coinGeo, coinMats); c.rotation.x = Math.PI / 2; g.add(c);
+  const g = new THREE.Group(), c = new THREE.Group();
+  c.add(new THREE.Mesh(coinParts.rimGeo, coinParts.rimM));
+  for (const sgn of [1, -1]) {
+    const f = new THREE.Mesh(coinParts.faceGeo, coinParts.faceM);
+    f.rotation.x = -sgn * Math.PI / 2; if (sgn < 0) f.rotation.z = Math.PI; f.position.y = sgn * 0.03; c.add(f);
+  }
+  c.rotation.x = Math.PI / 2; g.add(c);
   return g;
 }
 
@@ -1040,7 +1048,7 @@ function groundTexFor(id, n, local) {
   return { tex: id === 'outdoor' ? PROC.camp() : PROC.yard(), key: null };
 }
 const groundGeo = new THREE.PlaneGeometry(TW, L);
-const wallGeo = new THREE.PlaneGeometry(L, HALL_H), ceilGeo = new THREE.PlaneGeometry(HALL_X * 2, L), fenceGeo = new THREE.PlaneGeometry(L, 1.6);
+const wallGeo = new THREE.PlaneGeometry(L, WALL_H), upperGeo = new THREE.PlaneGeometry(L, HALL_H - WALL_H), ceilGeo = new THREE.PlaneGeometry(HALL_X * 2, L), fenceGeo = new THREE.PlaneGeometry(L, 1.6);
 const matCache = new Map();
 function cachedMat(key, make) { if (!matCache.has(key)) matCache.set(key, make()); return matCache.get(key); }
 const sideGeo = new THREE.PlaneGeometry(60, L);
@@ -1072,7 +1080,13 @@ function buildChunk(n) {
       const wt = img(wk) ? texFromImage(wk) : (kitchen ? PROC.kitchenWall(n + (side > 0 ? 1 : 0)) : PROC.livingWall(n + (side > 0 ? 1 : 0)));
       const wall = new THREE.Mesh(wallGeo, cachedMat('w' + wt.uuid, () => new THREE.MeshStandardMaterial({ map: wt, roughness: 0.75, envMapIntensity: 0.25, emissive: 0x1E1B16, emissiveMap: wt })));
       wall.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
-      wall.position.set(side * HALL_X, HALL_H / 2, -L / 2); wall.receiveShadow = true; g.add(wall);
+      wall.position.set(side * HALL_X, WALL_H / 2, -L / 2); wall.receiveShadow = true; g.add(wall);
+      // plain painted upper wall, a picture rail and a crown moulding: a tall, airy room
+      const up = new THREE.Mesh(upperGeo, mat(kitchen ? 'upperK' : 'upperL', { color: kitchen ? 0xF7F1E3 : 0xEFE6D2, roughness: 0.85, emissive: 0x1E1B16 }));
+      up.rotation.y = wall.rotation.y; up.position.set(side * HALL_X, (WALL_H + HALL_H) / 2, -L / 2); g.add(up);
+      const trimM = mat('trimwhite', { color: 0xFFFFFF, roughness: 0.4 });
+      g.add(at(box(0.08, 0.12, L, trimM), side * (HALL_X - 0.04), WALL_H + 0.02, -L / 2));
+      g.add(at(box(0.22, 0.3, L, trimM), side * (HALL_X - 0.11), HALL_H - 0.15, -L / 2));
     }
     const ceil = new THREE.Mesh(ceilGeo, cachedMat('ceil', () => { const t = PROC.ceiling().clone(); t.needsUpdate = true; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(1, 4); return new THREE.MeshBasicMaterial({ map: t, color: 0xF2ECDF }); }));
     ceil.rotation.x = Math.PI / 2; ceil.position.set(0, HALL_H, -L / 2); g.add(ceil);
@@ -1116,11 +1130,10 @@ function buildChunk(n) {
       }
       g.add(pc);
     }
-    // pendant lights down the hall, framed pictures between the furniture, an archway between kitchen and living room
-    for (const z of [-L / 4, -3 * L / 4]) {
-      g.add(at(cyl(0.012, 0.012, 0.9, mat('cord', { color: 0x222222 }), 4), 0, HALL_H - 0.45, z));
-      const shade = at(cone(0.45, 0.35, kitchen ? mat('pendantK', { color: 0x2E7D32, roughness: 0.4, side: THREE.DoubleSide }) : mat('pendantL', { color: 0xF4E6C8, roughness: 0.6, side: THREE.DoubleSide }), 16), 0, HALL_H - 1.0, z); g.add(shade);
-      g.add(at(sphere(0.16, mat('bulb', { color: 0xFFF3C0, emissive: 0xFFE07A, emissiveIntensity: 3 })), 0, HALL_H - 1.15, z));
+    // flush round ceiling lights (no hanging lamps in the runner's face), framed pictures, an archway between kitchen and living room
+    for (const z of [-L / 4, -3 * L / 4]) for (const x of [-2.6, 2.6]) {
+      g.add(at(cyl(0.55, 0.55, 0.05, mat('lampring', { color: 0xFFFFFF, roughness: 0.4 }), 24), x, HALL_H - 0.025, z));
+      g.add(at(cyl(0.45, 0.45, 0.04, mat('lampdisc', { color: 0xFFF6DC, emissive: 0xFFE9B0, emissiveIntensity: 1.1 }), 24), x, HALL_H - 0.06, z));
     }
     for (const side of [-1, 1]) for (let i = 1; i < 3; i++) {
       const fr = new THREE.Group(); fr.position.set(side * (HALL_X - 0.06), 2.9, -i * L / 3); fr.rotation.y = side < 0 ? Math.PI / 2 : -Math.PI / 2;
@@ -1130,7 +1143,7 @@ function buildChunk(n) {
     if (k === KITCHEN_TILES) {
       const arch = mat('trimwhite', { color: 0xFFFFFF, roughness: 0.4 });
       for (const x of [-1, 1]) g.add(at(box(0.6, HALL_H, 0.6, arch, 0.05), x * (HALL_X - 0.3), HALL_H / 2, -0.3));
-      g.add(at(box(HALL_X * 2, 0.6, 0.6, arch, 0.05), 0, HALL_H - 0.3, -0.3));
+      g.add(at(box(HALL_X * 2, HALL_H - 5.0, 0.6, arch, 0.05), 0, (HALL_H + 5.0) / 2, -0.3));
     }
     if (!kitchen) {   // living-room rugs beside the path
       for (const side of [-1, 1]) {

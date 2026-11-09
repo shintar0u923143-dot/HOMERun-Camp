@@ -45,6 +45,11 @@
   .row .sc{font-weight:800}
   .gold{background:#FFE58A !important}.silver{background:#E6E6E6 !important}.bronze{background:#F2C7A0 !important}
   .me{outline:2px solid #2E7D32}
+  .chars{display:flex;gap:6px;margin:4px 0 6px}
+  .card button.ch{flex:1;margin:0;padding:4px 2px 6px;background:#fff;color:#1B1B1B;box-shadow:0 0 0 2px #D9E8CF;border-radius:12px;font-size:13px;display:flex;flex-direction:column;align-items:center;line-height:1.15}
+  .card button.ch img{width:100%;max-width:96px;aspect-ratio:5/6;object-fit:contain}
+  .card button.ch span{font-size:10px;font-weight:600;color:#4E7A3A}
+  .card button.ch.on{background:#E9F6DF;box-shadow:0 0 0 3px #2E7D32}
   .big{font-size:32px;font-weight:900;color:#2E7D32;margin:6px 0}
   .reason{color:#D32F2F;font-weight:700;margin-bottom:4px}
   #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;background:#1f4d1c;z-index:4}
@@ -1378,88 +1383,211 @@ const HAT_REST = new THREE.Vector3(0, 0.33, 0);
 let runner, runPhase = 0, swimPhase = 0, hatFx = null;
 const POSE = { lt: 0, rt: 0, lk: 0, rk: 0, las: 0, ras: 0, lasz: -0.12, rasz: 0.12, lel: 1.2, rel: 1.2, spX: -0.2, spY: 0, hipY: 0, bob: 0, bpX: 0, headX: 0 };
 function capsule(r, len, m) { return new THREE.Mesh(G['cap' + r + len] || (G['cap' + r + len] = new THREE.CapsuleGeometry(r, len, 5, 12)), m); }
-function buildRunner() {
-  runner = new THREE.Group();
-  const skin = mat('rskin', { color: 0xF2BD90, roughness: 0.55 }), shirt = mat('rshirt', { color: 0x47B04B, roughness: 0.55 }),
-    shirtDk = mat('rshirtdk', { color: 0x2F8A36, roughness: 0.6 }),
-    shorts = mat('rshorts', { color: 0x8F8B3C, roughness: 0.65 }), boot = mat('rboot', { color: 0x6E4526, roughness: 0.55 }),
-    sole = mat('rsole', { color: 0x3A2414, roughness: 0.8 }), sock = mat('rsock', { color: 0xF1EAD6, roughness: 0.8 }),
-    hair = mat('rhair', { color: 0x4A2C18, roughness: 0.6 }), hatM = mat('rhat', { color: 0xCDB54A, roughness: 0.6 }),
-    band = mat('rband', { color: 0x6F5F22, roughness: 0.7 }), pack = mat('rpack', { color: 0x5A6A30, roughness: 0.6 }),
-    packDk = mat('rpackdk', { color: 0x3F4C21, roughness: 0.65 }), roll = mat('rroll', { color: 0xC29B68, roughness: 0.75 }),
-    buckle = mat('rbuckle', { color: 0xD9C27A, metalness: 0.6, roughness: 0.3 });
-  const pivot = new THREE.Group(); pivot.position.y = 0.62; runner.add(pivot);        // roll pivot near the centre of mass
+// Three playable characters share one rig; outfits, hair, headwear and what's on their back differ.
+const CHARS = [
+  { id: 'kai', name: 'Kai', tag: 'Street camper', skin: 0xE8B48A, hair: 0x2B1B12, hairStyle: 'spiky',
+    top: 0x2E7D32, topDk: 0x1E5A22, sleeves: 'long', bottom: 0x7D7A6A, longLegs: false, shoe: 0xF5F5F5, sole: 0xD5D8DC, sock: 0xFFFFFF,
+    hat: 'capBack', hatCol: 0x6DBE45, outfit: 'hoodie', back: 'pack' },
+  { id: 'maya', name: 'Maya', tag: 'Trail camper', skin: 0xC98E66, hair: 0x3A2216, hairStyle: 'ponytail',
+    top: 0xF4EBD8, topDk: 0xD9CDB3, sleeves: 'short', bottom: 0x2D3540, longLegs: true, shoe: 0x8A5A32, sole: 0x3A2414, sock: 0xC6D62C,
+    hat: null, headlamp: true, outfit: 'flannel', back: 'daypack' },
+  { id: 'rico', name: 'Rico', tag: 'HOMER handyman', skin: 0xD9A27A, hair: 0x1E140E, hairStyle: 'short',
+    top: 0xF7F3E8, topDk: 0xDCD5C2, sleeves: 'short', bottom: 0x2F7D3A, longLegs: true, shoe: 0x5A3A22, sole: 0x2A1A10, sock: 0x5A3A22,
+    hat: 'capFront', hatCol: 0x6DBE45, outfit: 'overalls', back: 'ladder' },
+];
+const KEY_CHAR = 'homer-camp-run-char';
+let charId = CHARS[0].id;
+const plaidTex = () => canvasTex(128, 128, (g, w, h) => {
+  g.fillStyle = '#B83227'; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(40,10,10,.55)'; for (let i = 0; i < 4; i++) { g.fillRect(i * 32 + 8, 0, 12, h); g.fillRect(0, i * 32 + 8, w, 12); }
+  g.fillStyle = 'rgba(255,230,200,.35)'; for (let i = 0; i < 4; i++) { g.fillRect(i * 32 + 26, 0, 2, h); g.fillRect(0, i * 32 + 26, w, 2); }
+}, 'plaid', { wrap: true });
+function emblemDisc(r) {
+  const m = cachedMat('emblemDisc', () => img('homer-emblem') ? new THREE.MeshBasicMaterial({ map: texFromImage('homer-emblem'), toneMapped: false }) : new THREE.MeshBasicMaterial({ color: 0x6DBE45 }));
+  return new THREE.Mesh(G['edisc' + r] || (G['edisc' + r] = new THREE.CircleGeometry(r, 32)), m);
+}
+function makeRunner(cfg) {
+  const P = {}, id = cfg.id, K = k => id + '-' + k;
+  const skin = mat(K('skin'), { color: cfg.skin, roughness: 0.55 }), top = mat(K('top'), { color: cfg.top, roughness: 0.6 }), topDk = mat(K('topdk'), { color: cfg.topDk, roughness: 0.65 }),
+    bottom = mat(K('bottom'), { color: cfg.bottom, roughness: 0.7 }), shoe = mat(K('shoe'), { color: cfg.shoe, roughness: 0.5 }), sole = mat(K('sole'), { color: cfg.sole, roughness: 0.7 }),
+    sock = mat(K('sock'), { color: cfg.sock, roughness: 0.8 }), hair = mat(K('hair'), { color: cfg.hair, roughness: 0.6 }),
+    dark = mat('rdark', { color: 0x1E1E22, roughness: 0.5 }), strapM = mat('rstrap', { color: 0x2B2B30, roughness: 0.7 }), buckle = mat('rbuckle', { color: 0xD9C27A, metalness: 0.6, roughness: 0.3 });
+  const group = new THREE.Group();
+  const pivot = new THREE.Group(); pivot.position.y = 0.62; group.add(pivot);        // roll pivot near the centre of mass
   const rig = new THREE.Group(); rig.position.y = -0.62; pivot.add(rig);
   const hips = new THREE.Group(); hips.position.y = 0.84; rig.add(hips);
-  hips.add(box(0.44, 0.24, 0.28, shorts, 0.09));
-  hips.add(at(box(0.45, 0.05, 0.29, band, 0.02), 0, 0.11, 0));                          // belt
+  hips.add(box(0.44, 0.24, 0.28, bottom, 0.09));
+  // legs: shorts with bare shins, or full-length trousers / leggings; sneakers or boots
   const leg = side => {
     const thigh = new THREE.Group(); thigh.position.set(side * 0.12, -0.06, 0); hips.add(thigh);
-    thigh.add(at(capsule(0.11, 0.16, shorts), 0, -0.15, 0));
-    thigh.add(at(box(0.05, 0.1, 0.12, shorts, 0.02), side * 0.09, -0.16, 0));          // cargo pocket
+    thigh.add(at(capsule(0.11, 0.16, bottom), 0, -0.15, 0));
+    if (!cfg.longLegs) thigh.add(at(box(0.05, 0.1, 0.12, bottom, 0.02), side * 0.09, -0.16, 0));   // cargo pocket
     const knee = new THREE.Group(); knee.position.y = -0.35; thigh.add(knee);
-    knee.add(at(capsule(0.075, 0.18, skin), 0, -0.13, 0));
+    knee.add(at(capsule(cfg.longLegs ? 0.088 : 0.075, 0.18, cfg.longLegs ? bottom : skin), 0, -0.13, 0));
     knee.add(at(cyl(0.085, 0.085, 0.08, sock, 12), 0, -0.27, 0));
-    knee.add(at(box(0.18, 0.15, 0.3, boot, 0.06), 0, -0.35, -0.05));
-    knee.add(at(box(0.185, 0.045, 0.31, sole, 0.015), 0, -0.42, -0.05));
+    if (cfg.shoe === 0xF5F5F5) {   // chunky sneakers
+      knee.add(at(box(0.19, 0.14, 0.32, shoe, 0.07), 0, -0.34, -0.05));
+      knee.add(at(box(0.2, 0.06, 0.33, sole, 0.025), 0, -0.42, -0.05));
+      for (const sx of [-1, 1]) knee.add(at(box(0.012, 0.05, 0.16, mat('rswoosh', { color: 0x2E7D32 })), sx * 0.097, -0.35, -0.07));   // green side stripes
+    } else {                       // hiking / work boots with a cuff
+      knee.add(at(box(0.19, 0.17, 0.31, shoe, 0.06), 0, -0.34, -0.05));
+      knee.add(at(cyl(0.1, 0.1, 0.06, shoe, 12), 0, -0.25, 0));
+      knee.add(at(box(0.195, 0.05, 0.32, sole, 0.02), 0, -0.43, -0.05));
+    }
     return { thigh, knee };
   };
-  R.L = leg(-1); R.Rl = leg(1);
+  P.L = leg(-1); P.Rl = leg(1);
   const spine = new THREE.Group(); spine.position.y = 0.08; hips.add(spine);
-  spine.add(at(box(0.5, 0.48, 0.3, shirt, 0.12), 0, 0.22, 0));
-  spine.add(at(box(0.2, 0.05, 0.03, shirtDk, 0.01), 0, 0.42, -0.135));                 // collar
+  spine.add(at(box(0.5, 0.48, 0.3, top, 0.12), 0, 0.22, 0));
+  spine.add(at(box(0.52, 0.06, 0.31, topDk, 0.03), 0, 0.0, 0));                      // hem
   spine.add(at(cyl(0.06, 0.07, 0.08, skin, 10), 0, 0.48, 0));
+  // outfit details
+  if (cfg.outfit === 'hoodie') {
+    const hood = sphere(0.19, topDk, { t0: 0, tl: Math.PI / 2 }); hood.position.set(0, 0.44, 0.13); hood.rotation.x = 1.75; hood.scale.set(1.25, 0.75, 0.9); spine.add(hood);
+    spine.add(at(box(0.3, 0.12, 0.04, topDk, 0.02), 0, 0.12, -0.15));                   // front pocket
+    for (const x of [-0.05, 0.05]) spine.add(at(cyl(0.008, 0.008, 0.16, mat('rstring', { color: 0xFFFFFF }), 4), x, 0.36, -0.16));
+  } else if (cfg.outfit === 'flannel') {
+    const pl = cachedMat('plaid', () => new THREE.MeshStandardMaterial({ map: plaidTex(), roughness: 0.75 }));
+    hips.add(at(box(0.48, 0.1, 0.32, pl, 0.04), 0, 0.08, 0));                            // sleeves knotted round the waist
+    hips.add(at(box(0.42, 0.3, 0.04, pl, 0.02), 0, -0.08, 0.16));                       // flannel hanging over the back
+    hips.add(at(sphere(0.06, pl), 0, 0.06, -0.17));                                     // the knot
+  } else if (cfg.outfit === 'overalls') {
+    spine.add(at(box(0.36, 0.3, 0.05, bottom, 0.03), 0, 0.15, -0.14));                 // bib
+    spine.add(at(box(0.12, 0.08, 0.02, mat('rpocket', { color: 0x266B30 }), 0.01), 0, 0.2, -0.17));
+    for (const s of [-1, 1]) { const st = at(box(0.07, 0.55, 0.03, bottom, 0.01), s * 0.1, 0.2, 0.155); st.rotation.z = s * 0.38; spine.add(st); }   // crossed straps on the back
+    for (const s of [-1, 1]) spine.add(at(box(0.06, 0.05, 0.035, buckle, 0.01), s * 0.14, 0.4, -0.16));
+    for (const s of [-1, 1]) hips.add(at(box(0.13, 0.12, 0.02, mat('rpocket', { color: 0x266B30 }), 0.02), s * 0.11, -0.02, 0.145));   // back pockets
+    const belt = mat('rtoolbelt', { color: 0x7A4B2A, roughness: 0.7 });
+    hips.add(at(box(0.5, 0.07, 0.34, belt, 0.03), 0, 0.09, 0));                         // tool belt
+    hips.add(at(box(0.1, 0.14, 0.08, belt, 0.02), -0.27, 0.0, 0.02));                   // pouch
+    const tape = at(box(0.09, 0.09, 0.05, mat('rtape', { color: 0xF2C230, roughness: 0.4 }), 0.02), 0.27, 0.04, 0.03); hips.add(tape);
+    const ham = new THREE.Group(); ham.position.set(0.26, -0.05, -0.08); hips.add(ham);
+    ham.add(at(cyl(0.018, 0.018, 0.24, mat('rhandle', { color: 0xC08A4A }), 6), 0, -0.08, 0));
+    ham.add(at(box(0.04, 0.04, 0.12, mat('steel', { color: 0xC9CED3, metalness: 0.8, roughness: 0.25 }), 0.01), 0, 0.05, 0));
+  } else hips.add(at(box(0.45, 0.05, 0.29, strapM, 0.02), 0, 0.11, 0));
+  // head and face
   const head = new THREE.Group(); head.position.y = 0.5; spine.add(head);
   head.add(at(sphere(0.2, skin), 0, 0.17, 0));
-  const hr = sphere(0.205, hair); hr.position.set(0, 0.2, 0.04); head.add(hr);
   for (const s of [-1, 1]) head.add(at(sphere(0.05, skin), s * 0.2, 0.15, 0.02));
-  const hat = new THREE.Group(); hat.position.copy(HAT_REST); head.add(hat);
-  const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.32, 0.07, 28, 1, true), hatM); brim.material.side = THREE.DoubleSide; hat.add(brim);
-  hat.add(at(cyl(0.17, 0.195, 0.17, hatM, 24), 0, 0.09, 0));
-  hat.add(at(cyl(0.198, 0.198, 0.05, band, 24), 0, 0.04, 0));
-  hat.add(at(cyl(0.13, 0.17, 0.03, hatM, 24), 0, 0.185, 0));
-  // backpack with bedroll, pocket and straps
-  const bp = new THREE.Group(); bp.position.set(0, 0.26, 0.2); spine.add(bp);
-  bp.add(box(0.48, 0.56, 0.25, pack, 0.1));
-  bp.add(at(box(0.32, 0.2, 0.09, packDk, 0.04), 0, -0.1, 0.13));
-  bp.add(at(box(0.07, 0.36, 0.04, packDk, 0.015), -0.12, 0.05, 0.12)); bp.add(at(box(0.07, 0.36, 0.04, packDk, 0.015), 0.12, 0.05, 0.12));
-  for (const x of [-0.12, 0.12]) bp.add(at(box(0.06, 0.04, 0.03, buckle, 0.01), x, -0.06, 0.16));
-  const rl = at(cyl(0.085, 0.085, 0.46, roll, 16), 0, 0.31, 0.02); rl.rotation.z = Math.PI / 2; bp.add(rl);
-  for (const x of [-0.13, 0.13]) { const s = at(cyl(0.088, 0.088, 0.03, packDk, 16), x, 0.31, 0.02); s.rotation.z = Math.PI / 2; bp.add(s); }
-  for (const x of [-0.13, 0.13]) spine.add(at(box(0.06, 0.03, 0.3, packDk, 0.01), x, 0.46, 0.06));
-  bp.add(at(cyl(0.055, 0.055, 0.22, mat('rbottle', { color: 0x3FA7E0, roughness: 0.25, metalness: 0.2 }), 12), 0.27, -0.1, 0.02));
-  bp.add(at(cyl(0.035, 0.035, 0.04, mat('rcap', { color: 0x222222 }), 10), 0.27, 0.03, 0.02));
-  const cb = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 14), buckle); cb.position.set(-0.2, -0.2, 0.13); bp.add(cb);
-  spine.add(at(box(0.52, 0.06, 0.31, shirtDk, 0.03), 0, 0.0, 0));                    // shirt hem
-  for (let i = 0; i < 3; i++) { const t = cone(0.05, 0.12, hair, 5); t.position.set(-0.06 + i * 0.06, 0.37, 0.08 + (i % 2) * 0.03); t.rotation.x = 0.6; head.add(t); }
+  for (const s of [-1, 1]) {
+    head.add(at(sphere(0.026, dark), s * 0.07, 0.19, -0.18));
+    head.add(at(box(0.07, 0.016, 0.02, hair), s * 0.075, 0.25, -0.18));
+  }
+  head.add(at(sphere(0.03, skin), 0, 0.15, -0.2));
+  const smile = new THREE.Mesh(new THREE.TorusGeometry(0.045, 0.008, 4, 10, Math.PI), mat('rmouth', { color: 0x8A3A2A })); smile.position.set(0, 0.1, -0.188); smile.rotation.z = Math.PI; head.add(smile);
+  const hr = sphere(0.205, hair, { t0: 0, tl: Math.PI * 0.62 }); hr.position.set(0, 0.19, 0.03); hr.rotation.x = 0.35; head.add(hr);
+  head.add(at(sphere(0.2, hair), 0, 0.18, 0.05));
+  if (cfg.hairStyle === 'spiky') for (let i = 0; i < 4; i++) { const t = cone(0.05, 0.13, hair, 5); t.position.set(-0.09 + i * 0.06, 0.3 - (i % 2) * 0.03, 0.15); t.rotation.x = 1.0; head.add(t); }
+  let tail = null;
+  if (cfg.hairStyle === 'ponytail') {
+    head.add(at(sphere(0.06, mat('rscrunch', { color: 0x6DBE45 })), 0, 0.3, 0.18));
+    tail = new THREE.Group(); tail.position.set(0, 0.3, 0.2); head.add(tail);
+    tail.add(at(capsule(0.07, 0.22, hair), 0, -0.16, 0.03));
+    tail.add(at(sphere(0.06, hair), 0, -0.33, 0.04));
+  }
+  if (cfg.headlamp) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.205, 0.022, 6, 28), mat('rlampband', { color: 0x2B2B30 })); band.position.y = 0.24; band.rotation.x = Math.PI / 2; head.add(band);
+    head.add(at(box(0.09, 0.07, 0.05, mat('rlampbox', { color: 0x6DBE45 }), 0.02), 0, 0.25, -0.21));
+    const lens = at(cyl(0.025, 0.025, 0.02, mat('rlens', { color: 0xFFF6C0, emissive: 0xFFE07A, emissiveIntensity: 1.2 }), 12), 0, 0.25, -0.24); lens.rotation.x = Math.PI / 2; head.add(lens);
+  }
+  // headwear (the bit that can fly off)
+  let hat = null;
+  if (cfg.hat) {
+    hat = new THREE.Group(); hat.position.copy(HAT_REST); head.add(hat);
+    const hm = mat(K('hat'), { color: cfg.hatCol, roughness: 0.55 }), hmDk = mat(K('hatdk'), { color: 0x2E7D32, roughness: 0.6 });
+    const dome = sphere(0.218, hm, { t0: 0, tl: Math.PI / 2 }); dome.scale.set(1, 0.82, 1.02); dome.position.y = -0.13; hat.add(dome);
+    hat.add(at(sphere(0.025, hmDk), 0, 0.05, 0));
+    const fwd = cfg.hat === 'capFront' ? -1 : 1;
+    const brimGeo = G.capBrim || (G.capBrim = new THREE.CylinderGeometry(0.19, 0.19, 0.022, 20, 1, false, Math.PI / 2, Math.PI));
+    const brim = new THREE.Mesh(brimGeo, hmDk); brim.position.set(0, -0.125, fwd * 0.12); if (fwd > 0) brim.rotation.y = Math.PI; brim.rotation.x = fwd * 0.1; hat.add(brim);
+    const logo = emblemDisc(0.075); logo.position.set(0, -0.04, -fwd * 0.2); logo.rotation.y = fwd < 0 ? Math.PI : 0; logo.rotation.x = fwd < 0 ? 0.5 : -0.5; hat.add(logo);
+    if (fwd < 0) hat.add(at(box(0.1, 0.05, 0.02, hmDk, 0.01), 0, -0.1, 0.2));         // snapback strap at the back
+  }
+  // what's on their back
+  const bp = new THREE.Group(); spine.add(bp);
+  if (cfg.back === 'pack') {
+    bp.position.set(0, 0.2, 0.2);
+    const pk = mat('rpackgrey', { color: 0x3B3F46, roughness: 0.6 });
+    bp.add(box(0.38, 0.4, 0.2, pk, 0.08));
+    const rl = at(cyl(0.075, 0.075, 0.46, mat('rmat', { color: 0xC6D62C, roughness: 0.7 }), 16), 0, -0.24, 0.02); rl.rotation.z = Math.PI / 2; bp.add(rl);
+    for (const x of [-0.13, 0.13]) { const s = at(cyl(0.078, 0.078, 0.03, strapM, 16), x, -0.24, 0.02); s.rotation.z = Math.PI / 2; bp.add(s); }
+    const e = emblemDisc(0.08); e.position.set(0, 0.04, 0.102); bp.add(e);
+  } else if (cfg.back === 'daypack') {
+    bp.position.set(0, 0.24, 0.2);
+    const pk = mat('rpackgreen', { color: 0x6DBE45, roughness: 0.55 }), pkDk = mat('rpackgreendk', { color: 0x2E7D32, roughness: 0.6 });
+    bp.add(box(0.4, 0.46, 0.2, pk, 0.1));
+    bp.add(at(box(0.3, 0.18, 0.08, pkDk, 0.04), 0, -0.1, 0.12));
+    const e = emblemDisc(0.07); e.position.set(0, 0.1, 0.102); bp.add(e);
+    bp.add(at(cyl(0.05, 0.05, 0.2, mat('rbottle', { color: 0x3FA7E0, roughness: 0.25, metalness: 0.2 }), 12), 0.24, -0.08, 0.02));
+    const cb = new THREE.Mesh(new THREE.TorusGeometry(0.035, 0.008, 6, 14), buckle); cb.position.set(-0.17, -0.18, 0.13); bp.add(cb);
+  } else if (cfg.back === 'ladder') {
+    // a folded HOMER step ladder strapped to the back
+    bp.position.set(0, 0.2, 0.19); bp.rotation.z = 0.06;
+    const al = mat('ralu', { color: 0xAEB4BA, metalness: 0.45, roughness: 0.45 }), stepM = mat('rstep', { color: 0x6DBE45, roughness: 0.45 });
+    for (const x of [-0.17, 0.17]) { bp.add(at(box(0.05, 0.76, 0.04, al, 0.01), x, 0.0, 0)); bp.add(at(box(0.05, 0.72, 0.04, al, 0.01), x * 0.92, -0.02, 0.05)); }
+    for (let i = 0; i < 3; i++) bp.add(at(box(0.36, 0.04, 0.09, stepM, 0.015), 0, -0.27 + i * 0.21, 0.02));
+    bp.add(at(box(0.38, 0.07, 0.1, mat('rladtop', { color: 0x2E7D32 }), 0.02), 0, 0.39, 0.02));
+    const lbl = new THREE.Mesh(new THREE.PlaneGeometry(0.28, 0.14), brandMat('')); lbl.position.set(0, 0.255, 0.075); bp.add(lbl);
+  }
+  for (const x of [-0.13, 0.13]) spine.add(at(box(0.06, 0.03, 0.3, strapM, 0.01), x, 0.46, 0.06));   // shoulder straps
+  // arms: long sleeves (hoodie) or a T-shirt
   const arm = side => {
     const sh = new THREE.Group(); sh.position.set(side * 0.31, 0.38, 0); spine.add(sh);
-    sh.add(sphere(0.1, shirt));
-    sh.add(at(capsule(0.088, 0.06, shirt), 0, -0.07, 0));                               // sleeve
-    sh.add(at(capsule(0.068, 0.12, skin), 0, -0.17, 0));
+    sh.add(sphere(0.1, top));
+    sh.add(at(capsule(0.088, 0.06, top), 0, -0.07, 0));
+    sh.add(at(capsule(cfg.sleeves === 'long' ? 0.078 : 0.068, 0.12, cfg.sleeves === 'long' ? top : skin), 0, -0.17, 0));
     const el = new THREE.Group(); el.position.y = -0.27; sh.add(el);
-    el.add(at(capsule(0.062, 0.12, skin), 0, -0.1, 0));
+    el.add(at(capsule(cfg.sleeves === 'long' ? 0.07 : 0.062, 0.12, cfg.sleeves === 'long' ? top : skin), 0, -0.1, 0));
+    if (cfg.sleeves === 'long') el.add(at(cyl(0.07, 0.07, 0.05, topDk, 12), 0, -0.19, 0));
     el.add(at(sphere(0.078, skin), 0, -0.24, 0));
     return { sh, el };
   };
-  R.aL = arm(-1); R.aR = arm(1);
+  P.aL = arm(-1); P.aR = arm(1);
   rig.scale.setScalar(1.12);
-  Object.assign(R, { pivot, rig, hips, spine, head, hat, bp });
-  runner.traverse(o => { if (o.isMesh) { o.castShadow = true; } });
+  Object.assign(P, { pivot, rig, hips, spine, head, hat, bp, tail });
+  group.traverse(o => { if (o.isMesh) o.castShadow = true; });
+  return { group, P };
+}
+function buildRunner(id) {
+  const cfg = CHARS.find(c => c.id === id) || CHARS[0]; charId = cfg.id;
+  if (runner) scene.remove(runner);
+  hatFx = null;
+  const { group, P } = makeRunner(cfg);
+  runner = group;
+  for (const k in R) delete R[k]; Object.assign(R, P);
   const sh = blobShadow(0.5, 0.32); sh.material = shadowMat; runner.add(sh); runner.userData.shadow = sh;
   const splash = new THREE.Mesh(new THREE.RingGeometry(0.45, 0.7, 28), new THREE.MeshBasicMaterial({ color: 0xFFFFFF, transparent: true, opacity: 0.6, depthWrite: false }));
   splash.rotation.x = -Math.PI / 2; splash.visible = false; runner.add(splash); runner.userData.splash = splash;
   scene.add(runner);
 }
+// portrait thumbnails for the character picker, rendered once with a small throwaway renderer
+const charThumbs = {};
+function renderCharThumbs() {
+  let r;
+  try {
+    r = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+    r.setSize(150, 180, false); r.outputColorSpace = THREE.SRGBColorSpace; r.toneMapping = THREE.ACESFilmicToneMapping;
+    const sc = new THREE.Scene();
+    sc.add(new THREE.HemisphereLight(0xFFFFFF, 0x7A8F6A, 1.5));
+    const d = new THREE.DirectionalLight(0xFFF0D2, 2.4); d.position.set(-2, 4, -4); sc.add(d);
+    const cam = new THREE.PerspectiveCamera(30, 150 / 180, 0.1, 50); cam.position.set(-1.7, 1.55, -3.6); cam.lookAt(0, 0.98, 0);
+    for (const c of CHARS) {
+      const { group, P } = makeRunner(c);
+      P.aL.sh.rotation.set(0.1, 0, -0.12); P.aR.sh.rotation.set(-0.1, 0, 0.12); P.aL.el.rotation.x = 0.5; P.aR.el.rotation.x = 0.5;
+      group.rotation.y = 0.35; sc.add(group); r.render(sc, cam); charThumbs[c.id] = r.domElement.toDataURL('image/png'); sc.remove(group);
+    }
+  } catch (e) { console.warn('thumbnails', e); }
+  if (r) { r.dispose(); r.forceContextLoss(); }
+}
 // the hat: pops off on some jumps and rolls, floats, and the right hand catches it
 function hatPop(v) {
-  if (hatFx && hatFx.free) return;
+  if (!R.hat || (hatFx && hatFx.free)) return;
   if (hatFx) { R.hat.position.copy(HAT_REST); R.hat.quaternion.identity(); R.head.add(R.hat); }
   runner.attach(R.hat);
   hatFx = { free: true, t: 0, v, x0: R.hat.position.x, y0: R.hat.position.y, z0: R.hat.position.z, spin: (Math.random() < 0.5 ? -1 : 1) * (6 + Math.random() * 4) };
 }
 function hatUpdate(dt) {
-  if (!hatFx) return;
+  if (!hatFx || !R.hat) return;
   if (hatFx.free) {
     hatFx.t += dt; const t = hatFx.t, g = 13;
     R.hat.position.set(hatFx.x0 + Math.sin(t * 7) * 0.06, hatFx.y0 + hatFx.v * t - 0.5 * g * t * t, hatFx.z0 - t * 0.15);
@@ -1472,6 +1600,7 @@ function hatUpdate(dt) {
   }
 }
 function pickHatMode(isRoll) {
+  if (!R.hat) { player.hatMode = 'none'; return; }
   const r = Math.random();
   player.hatMode = r < 0.5 ? 'fly' : r < 0.8 ? 'hold' : 'none';
   if (player.hatMode === 'fly') hatPop(isRoll ? 3.0 : 3.6);
@@ -1520,6 +1649,11 @@ function setRunnerPose(dt) {
   R.aL.el.rotation.x = POSE.lel; R.aR.el.rotation.x = POSE.rel;
   R.spine.rotation.set(POSE.spX, POSE.spY, 0); R.hips.rotation.y = POSE.hipY; R.hips.position.y = 0.84 + POSE.bob;
   R.bp.rotation.x = POSE.bpX; R.head.rotation.x = POSE.headX;
+  if (R.tail) {   // the ponytail swings with the stride, streams back in the air, whips round in a roll
+    const tx = rolling ? 1.3 : air ? 0.9 - clamp(player.vh * 0.05, -0.5, 0.5) : 0.35 + 0.18 * Math.sin(runPhase * 2);
+    R.tail.rotation.x += (tx - R.tail.rotation.x) * Math.min(1, dt * 12);
+    R.tail.rotation.z += (-POSE.spY * 1.4 - R.tail.rotation.z) * Math.min(1, dt * 12);
+  }
   R.pivot.rotation.x = pivotRot; R.pivot.position.y += (pivotY - R.pivot.position.y) * Math.min(1, dt * 25);
   // whole body: lean and turn into lane changes, squash on landing
   const dx = title ? 0 : laneX(player.lane) - player.xw;
@@ -1654,6 +1788,7 @@ function showTitle() {
       &bull; Swiping right into a counter or van brings the bear<br>
       &bull; Collect the HOMER leaf coins. One life. Three close calls and the bear catches you!
     </div>
+    <div class="chars">${CHARS.map(c => `<button class="ch ${c.id === charId ? 'on' : ''}" data-id="${c.id}">${charThumbs[c.id] ? `<img src="${charThumbs[c.id]}" alt="">` : ''}<b>${c.name}</b><span>${c.tag}</span></button>`).join('')}</div>
     <input id="pname" maxlength="16" placeholder="Enter your name" value="${esc(playerName)}" />
     <button id="startBtn" ${playerName.trim() ? '' : 'disabled'}>START RUN</button>
     <div class="board"><b>Top 10 Scoreboard</b>${boardHTML(null)}</div>`;
@@ -1662,6 +1797,10 @@ function showTitle() {
   inp.addEventListener('input', () => { btn.disabled = !inp.value.trim(); });
   inp.addEventListener('keydown', e => { if (e.key === 'Enter') go(); });
   btn.addEventListener('click', go);
+  card.querySelectorAll('.ch').forEach(b => b.addEventListener('click', () => {
+    buildRunner(b.dataset.id); safeSet(KEY_CHAR, b.dataset.id);
+    card.querySelectorAll('.ch').forEach(x => x.classList.toggle('on', x === b));
+  }));
 }
 function showOver() {
   const atT = Date.now(), pts = score(), rank = saveScore(playerName, pts, atT);
@@ -1971,7 +2110,7 @@ function frame(ts) {
 // ================= BOOT =================
 loadImages().then(() => {
   resize();
-  buildHorizon(); buildRunner(); buildAmbient(); bear = buildBear(); bear.visible = false; scene.add(bear);
+  buildHorizon(); buildRunner(safeGet(KEY_CHAR) || CHARS[0].id); renderCharThumbs(); buildAmbient(); bear = buildBear(); bear.visible = false; scene.add(bear);
   player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false, lift: false, ladder: false, sq: 0, wasAir: false };
   rebuildChunks();
   $('loading').remove();

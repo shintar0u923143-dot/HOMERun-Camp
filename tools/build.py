@@ -19,8 +19,8 @@ for d in dirs:
         if p.suffix.lower() in MIME:
             assets[p.stem] = 'data:%s;base64,%s' % (MIME[p.suffix.lower()], base64.b64encode(p.read_bytes()).decode())
 
-if 'full3d' in SRC.get(target, ''):          # the full-3D build uses no pictures except the HOMER logo
-    assets = {p.stem: 'data:image/png;base64,' + base64.b64encode(p.read_bytes()).decode() for p in sorted((root / 'brand').glob('*.png'))}
+if 'full3d' in SRC.get(target, ''):          # the full-3D build only embeds assets-brand/ (HOMER logo, wall art)
+    assets = {p.stem: 'data:%s;base64,%s' % (MIME[p.suffix.lower()], base64.b64encode(p.read_bytes()).decode()) for p in sorted((root / 'assets-brand').glob('*')) if p.suffix.lower() in MIME}
 out = src.replace('/*ASSETS*/{}', json.dumps(assets))
 
 if test and ('game3d' in SRC.get(target, '') or 'full3d' in SRC.get(target, '')):

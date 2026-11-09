@@ -775,14 +775,18 @@ function buildBear() {
   g.scale.setScalar(0.72);
   return g;
 }
-const coinGeo = new THREE.CylinderGeometry(0.34, 0.34, 0.08, 24);
-const coinMat = new THREE.MeshStandardMaterial({ color: 0xFFD23F, metalness: 0.25, roughness: 0.3, emissive: 0xC07A00, emissiveIntensity: 0.9 });
-const leafGeo = new THREE.SphereGeometry(0.15, 12, 8);
-const leafMat = new THREE.MeshStandardMaterial({ color: 0x6DBE45, roughness: 0.3 });
+// coins are HOMER leaf emblems: the logo on both faces, a deep-green rim
+const coinGeo = new THREE.CylinderGeometry(0.38, 0.38, 0.07, 32);
+let coinMats = null;
 function buildCoin() {
+  if (!coinMats) {
+    const face = img('homer-emblem') ? texFromImage('homer-emblem') : null;
+    const faceM = face ? new THREE.MeshBasicMaterial({ map: face, toneMapped: false }) : new THREE.MeshStandardMaterial({ color: 0x6DBE45, emissive: 0x2E7D32, emissiveIntensity: 0.6 });   // true logo colours
+    const rimM = new THREE.MeshStandardMaterial({ color: 0x2E7D32, emissive: 0x1E5A22, emissiveIntensity: 0.8, metalness: 0.4, roughness: 0.3 });
+    coinMats = [rimM, faceM, faceM];
+  }
   const g = new THREE.Group();
-  const c = new THREE.Mesh(coinGeo, coinMat); c.rotation.x = Math.PI / 2; g.add(c);
-  for (const z of [-0.05, 0.05]) { const lf = new THREE.Mesh(leafGeo, leafMat); lf.scale.set(0.6, 1, 0.25); lf.rotation.z = 0.6; lf.position.z = z; g.add(lf); }
+  const c = new THREE.Mesh(coinGeo, coinMats); c.rotation.x = Math.PI / 2; g.add(c);
   return g;
 }
 
@@ -925,7 +929,7 @@ function dustBurst(n, x, s, h, col = 0xD9C29A) {
   for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2; spawnPart({ x: x + Math.cos(a) * 0.2, s, y: h + 0.1, vx: Math.cos(a) * 1.4, vz: Math.sin(a) * 1.4, vy: 0.5 + Math.random() * 0.6, size: 0.45, grow: 2.2, life: 0.55, color: col, op: 0.65 }); }
 }
 function sparkle(x, s, y) {
-  for (let i = 0; i < 9; i++) { const a = Math.random() * Math.PI * 2, e = Math.random() * 2 - 0.6; spawnPart({ tex: starTex, x, s, y, vx: Math.cos(a) * 2.6, vz: Math.sin(a) * 1.2, vy: 2 + e * 2, g: 6, size: 0.28, grow: -0.6, life: 0.45, color: 0xFFE680, op: 1, spin: 8 }); }
+  for (let i = 0; i < 9; i++) { const a = Math.random() * Math.PI * 2, e = Math.random() * 2 - 0.6; spawnPart({ tex: starTex, x, s, y, vx: Math.cos(a) * 2.6, vz: Math.sin(a) * 1.2, vy: 2 + e * 2, g: 6, size: 0.28, grow: -0.6, life: 0.45, color: 0xDDEB6A, op: 1, spin: 8 }); }
 }
 function updateParts(dt, viewDist) {
   for (let i = parts.length - 1; i >= 0; i--) {
@@ -1535,7 +1539,7 @@ function popup(text, color, yPct = 40) {
 let state = 'loading', playerName = safeGet(KEY_NAME);
 let player, obstacles = [], coins = [], dist = 0, speed = 12, nextS = 22, bonus = 0, coinCount = 0, boostT = 0;
 let bearD = 1, lastNear = -99, lastStage = 0, time = 0, countdown = 0, deathReason = '', shake = 0, camX = 0, camY = 3.3;
-let bear, camKick = 0;
+let bear, camKick = 0, hudCoins = -1;
 const score = () => Math.floor(dist * 0.5) + bonus;
 
 function clearObjects() {
@@ -1904,7 +1908,7 @@ function syncScene(dt, viewDist) {
 
   // HUD
   if (state === 'play' || state === 'paused') {
-    $('hDist').textContent = Math.floor(dist * 0.5) + ' m'; $('hCoins').textContent = '● ' + coinCount; $('hScore').textContent = score();
+    $('hDist').textContent = Math.floor(dist * 0.5) + ' m'; if (hudCoins !== coinCount) { hudCoins = coinCount; const ce = img('homer-emblem'); $('hCoins').innerHTML = (ce ? `<img src="${ce.src}" style="width:20px;height:20px;vertical-align:-4px;margin-right:5px;border-radius:50%">` : '● ') + coinCount; } $('hScore').textContent = score();
     const showB = state === 'play' && (bearD < 1 || time - lastNear < 2.5);
     bearUI.style.display = showB ? 'flex' : 'none';
     $('bearFill').style.width = (bearD * 100) + '%'; $('bearFill').style.background = bearD < 0.35 ? '#D32F2F' : '#C6D62C';

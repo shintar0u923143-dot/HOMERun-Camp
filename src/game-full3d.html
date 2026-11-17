@@ -1142,11 +1142,12 @@ function buildChunk(n) {
   for (const side of [-1, 1]) {
     let m;
     if (gt.key) m = cachedMat('side' + gt.key + side, () => { const tt = sideTex(gt.key, side).clone(); tt.needsUpdate = true; tt.repeat.set(60 / (TW * 0.22), 1); return new THREE.MeshStandardMaterial({ map: tt, roughness: 0.95, envMapIntensity: 0.15 }); });
-    else if (id === 'backyard' || id === 'outdoor') m = cachedMat('yardside' + id, () => { const t = PROC.lawn().clone(); t.needsUpdate = true; t.repeat.set(12, 4); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, envMapIntensity: 0.15 }); });
+    else if (id === 'backyard' || id === 'outdoor' || id === 'house') m = cachedMat('yardside' + (id === 'house' ? 'backyard' : id), () => { const t = PROC.lawn().clone(); t.needsUpdate = true; t.repeat.set(12, 4); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.95, envMapIntensity: 0.15 }); });
     else m = mat('side' + id, { color: id === 'house' ? 0x7A5634 : 0x6DB848, roughness: 0.95 });
     const sp = new THREE.Mesh(sideGeo, m); sp.rotation.x = -Math.PI / 2; sp.position.set(side * (TW / 2 + 30), -0.01, -L / 2); sp.receiveShadow = true; g.add(sp);
   }
   if (id === 'house') {
+    buildHouseShell(g, k, n);
     const kitchen = k < KITCHEN_TILES;
     for (const side of [-1, 1]) {
       const wk = `wall-house-${side < 0 ? 'left' : 'right'}-0${1 + wrap(n, 4)}`;
@@ -1262,6 +1263,69 @@ function buildChunk(n) {
   return g;
 }
 
+// ---- the house from outside: siding walls with windows, a green shingle roof matching the front gable, chimneys,
+// skylights and a giant HOMER sign on the roof for jetpack flyers. Hidden from inside by the hall walls and ceiling.
+const HOUSE_W = 15, EAVE_Y = 8.4, RIDGE_Y = 14.9, EAVE_X = HOUSE_W + 0.8;
+const roofY = x => EAVE_Y + (RIDGE_Y - EAVE_Y) * (1 - Math.abs(x) / EAVE_X);
+function buildHouseShell(g, k, n) {
+  const siding = cachedMat('siding', () => new THREE.MeshStandardMaterial({ roughness: 0.7, map: canvasTex(512, 206, (c, w, h) => {
+    c.fillStyle = '#F6EEDC'; c.fillRect(0, 0, w, h);
+    c.fillStyle = 'rgba(160,140,110,.25)'; for (let y = 6; y < h; y += 9) c.fillRect(0, y, w, 1.5);
+    for (const x of [90, 330]) {
+      c.fillStyle = '#FFFFFF'; c.fillRect(x - 6, 60, 92, 92); c.fillStyle = '#9FD3EC'; c.fillRect(x, 66, 80, 80);
+      c.fillStyle = 'rgba(255,255,255,.55)'; c.beginPath(); c.moveTo(x + 6, 140); c.lineTo(x + 40, 72); c.lineTo(x + 56, 72); c.lineTo(x + 22, 140); c.fill();
+      c.fillStyle = '#FFFFFF'; c.fillRect(x + 37, 66, 6, 80); c.fillRect(x, 103, 80, 6);
+      c.fillStyle = '#2E7D32'; c.fillRect(x - 32, 58, 22, 96); c.fillRect(x + 90, 58, 22, 96);
+      c.fillStyle = '#8D6E63'; c.fillRect(x - 10, 152, 100, 8);
+      c.fillStyle = '#D8463C'; for (let i = 0; i < 6; i++) { c.beginPath(); c.arc(x + 4 + i * 15, 150, 6, 0, 7); c.fill(); }
+    }
+  }, 'siding-tex') }));
+  const shingles = cachedMat('roofslope', () => { const t = canvasTex(256, 256, (c, w, h) => {
+    c.fillStyle = '#2E6B33'; c.fillRect(0, 0, w, h);
+    for (let y = 0; y < h; y += 16) for (let x = (y / 16 % 2) * 16; x < w; x += 32) { c.fillStyle = hash(x * 7 + y) > 0.5 ? '#3A7D3F' : '#275C2B'; c.beginPath(); c.roundRect(x + 1, y, 30, 15, [0, 0, 8, 8]); c.fill(); }
+  }, 'shingle-tex2', { wrap: true }).clone(); t.needsUpdate = true; t.wrapS = t.wrapT = THREE.RepeatWrapping; t.repeat.set(5, 6); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.8 }); });
+  const white = mat('trimwhite', { color: 0xFFFFFF, roughness: 0.4 });
+  const slopeLen = Math.hypot(EAVE_X, RIDGE_Y - EAVE_Y), ang = Math.atan2(RIDGE_Y - EAVE_Y, EAVE_X);
+  for (const side of [-1, 1]) {
+    const wall = new THREE.Mesh(G.extWall || (G.extWall = new THREE.PlaneGeometry(L, EAVE_Y)), siding);
+    wall.rotation.y = side * Math.PI / 2; wall.position.set(side * HOUSE_W, EAVE_Y / 2, -L / 2); g.add(wall);
+    const slope = new THREE.Group(); slope.position.set(side * EAVE_X / 2, (EAVE_Y + RIDGE_Y) / 2, -L / 2); slope.rotation.z = -side * ang;
+    const pl = new THREE.Mesh(G.roofPl || (G.roofPl = new THREE.PlaneGeometry(slopeLen + 0.2, L + 0.02)), shingles); pl.rotation.x = -Math.PI / 2; slope.add(pl);
+    // skylights on one slope, solar panels on the other
+    for (let i = 0; i < 2; i++) {
+      const sk = new THREE.Mesh(G.skyl || (G.skyl = new THREE.BoxGeometry(2.0, 0.12, 2.6)), side < 0 ? mat('skylight', { color: 0x9FD3EC, roughness: 0.08, metalness: 0.2, emissive: 0x2A5566 }) : mat('solar', { color: 0x1F3550, roughness: 0.15, metalness: 0.5 }));
+      sk.position.set(-side * 2.5 * 0, 0.08, -L / 2 + 5 + i * 10); sk.position.x = side < 0 ? 1.5 : -2; if ((k + i) % 3 === 1) slope.add(sk);
+    }
+    g.add(slope);
+    g.add(at(box(0.3, 0.35, L, white), side * EAVE_X, EAVE_Y - 0.05, -L / 2));
+  }
+  g.add(at(box(0.7, 0.45, L + 0.02, mat('ridge', { color: 0x1F5223, roughness: 0.7 })), 0, RIDGE_Y + 0.05, -L / 2));
+  if (k % 5 === 2) {   // brick chimney
+    const ch = at(box(1.5, 3.4, 1.5, mat('brick', { color: 0xB55A3C, roughness: 0.85 })), 6.5, roofY(6.5) + 1.2, -L / 2); g.add(ch);
+    g.add(at(box(1.8, 0.3, 1.8, mat('brickcap', { color: 0x6E3A28 })), 6.5, roofY(6.5) + 2.95, -L / 2));
+  }
+  if (k === 4 || k === 10) {       // giant HOMER signs painted on the roof, only visible from the sky
+    for (const side of [-1, 1]) {
+      const sign = new THREE.Mesh(G.roofSign || (G.roofSign = new THREE.PlaneGeometry(12, 6)), cachedMat('roofsign', () => new THREE.MeshStandardMaterial({ map: brandTex(false), roughness: 0.6 })));
+      const grp = new THREE.Group(); grp.position.set(side * EAVE_X / 2, (EAVE_Y + RIDGE_Y) / 2 + 0.07, -L / 2); grp.rotation.z = -side * ang;
+      sign.rotation.x = -Math.PI / 2; sign.position.x = -side * 2.2; grp.add(sign); g.add(grp);
+    }
+  }
+  if (k === 7) {       // rooftop billboards for the flyers to zoom past
+    const bm = cachedMat('roofbill', () => new THREE.MeshStandardMaterial({ map: brandTex(true), roughness: 0.5, emissive: 0x222222 }));
+    for (const side of [-1, 1]) {
+      const x = side * 10, y0 = roofY(x);
+      const bb = new THREE.Mesh(G.bill || (G.bill = new THREE.PlaneGeometry(8, 4)), bm); bb.position.set(x, y0 + 5.2, -L / 2); bb.rotation.y = -side * 0.25; g.add(bb);
+      const back = new THREE.Mesh(G.bill, mat('billback', { color: 0x2E7D32 })); back.position.set(x, y0 + 5.2, -L / 2 - 0.05); back.rotation.y = Math.PI - side * 0.25; g.add(back);
+      for (const dx of [-2.6, 2.6]) g.add(at(cyl(0.12, 0.12, 3.4, mat('steel', { color: 0xC9CED3, metalness: 0.8, roughness: 0.25 }), 8), x + dx * Math.cos(0.25), y0 + 1.6, -L / 2 + side * dx * Math.sin(0.25) * 0));
+    }
+  }
+  if (k === STAGES[1].tiles - 1) {   // back gable end
+    const tri = new THREE.Shape(); tri.moveTo(-EAVE_X, 0); tri.lineTo(EAVE_X, 0); tri.lineTo(0, RIDGE_Y - EAVE_Y); tri.closePath();
+    const gable = new THREE.Mesh(new THREE.ExtrudeGeometry(tri, { depth: 0.4, bevelEnabled: false }), mat('housewall2', { color: 0xF6EEDC, roughness: 0.6 })); gable.position.set(0, EAVE_Y, -L - 0.2); g.add(gable);
+  }
+}
+
 // ---- swimming pool ----
 function buildPoolChunk(g, k) {
   const deckMat = cachedMat('deck', () => { const t = PROC.deck().clone(); t.needsUpdate = true; t.repeat.set(2, 8); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.6 }); });
@@ -1277,7 +1341,7 @@ function buildPoolChunk(g, k) {
   const floor = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, L), cachedMat('poolfloor', () => { const t = PROC.poolTile().clone(); t.needsUpdate = true; t.repeat.set(2, 8); return new THREE.MeshStandardMaterial({ map: t, roughness: 0.4 }); }));
   floor.rotation.x = -Math.PI / 2; floor.position.set(0, -1.5, -L / 2); g.add(floor);
   if (!waterTex) { waterTex = PROC.water(); waterTex.repeat.set(1.5, 6); }
-  const water = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, L), cachedMat('water', () => new THREE.MeshStandardMaterial({ map: waterTex, color: 0x9EDCF2, roughness: 0.08, metalness: 0.1, transparent: true, opacity: 0.8, envMapIntensity: 1.4 })));
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(POOL_W, L), cachedMat('water', () => new THREE.MeshStandardMaterial({ map: waterTex, color: 0x8FD8F0, roughness: 0.28, metalness: 0, transparent: true, opacity: 0.66, envMapIntensity: 0.7, depthWrite: false })));
   water.rotation.x = -Math.PI / 2; water.position.set(0, -0.12, -L / 2); water.receiveShadow = true; g.add(water);
   for (const edge of (k === POOL[0] ? [0] : k === POOL[1] - 1 ? [-L] : [])) {   // pool ends
     const c = box(POOL_W + 1, 0.14, 0.5, mat('coping', { color: 0xF4EEE2, roughness: 0.5 }));
@@ -1645,7 +1709,11 @@ function makeGear() {
   const u = new THREE.Mesh(new THREE.TorusGeometry(0.17, 0.065, 10, 20, Math.PI), mat('magRed', { color: 0xE53935, roughness: 0.35 })); u.rotation.z = Math.PI; mg.add(u);
   for (const x of [-0.17, 0.17]) mg.add(at(cyl(0.066, 0.066, 0.1, mat('magTip', { color: 0xCFD8DC, metalness: 0.7, roughness: 0.3 }), 10), x, 0.05, 0));
   mg.visible = false; g.add(mg);
-  return { g, jp, flames, sh, mg };
+  const bt = new THREE.Group();
+  const coilM = mat('springglow', { color: 0xC79BE0, emissive: 0x8E44AD, emissiveIntensity: 1.6, metalness: 0.4, roughness: 0.3 });
+  for (const x of [-0.17, 0.17]) for (let i = 0; i < 3; i++) { const t = new THREE.Mesh(G.coil || (G.coil = new THREE.TorusGeometry(0.11, 0.025, 6, 16)), coilM); t.rotation.x = Math.PI / 2; t.position.set(x, 0.04 + i * 0.05, 0); bt.add(t); }
+  bt.visible = false; g.add(bt);
+  return { g, jp, flames, sh, mg, bt };
 }
 // portrait thumbnails for the character picker, rendered once with a small throwaway renderer
 const charThumbs = {};
@@ -1697,8 +1765,9 @@ const smooth = x => { x = clamp(x, 0, 1); return x * x * (3 - 2 * x); };
 function setRunnerPose(dt) {
   dt = dt || 0;
   const T = {}, title = state === 'title';
-  const swim = !title && inPool(dist) && !player.airborne && player.roll <= 0;
-  const rolling = !title && player.roll > 0, air = !title && player.airborne;
+  const wet = !title && state !== 'over' && inPool(dist) && !player.airborne && !player.jetting;
+  const swim = wet && player.roll <= 0, dive = wet && player.roll > 0;
+  const rolling = !title && player.roll > 0 && !dive, air = !title && player.airborne;
   let pivotRot = 0, pivotY = 0.62;
   const dead = state === 'over', jet = !!(!title && !dead && player.jetting);
   if (dead) {           // knocked back off your feet, arms flung up
@@ -1720,9 +1789,20 @@ function setRunnerPose(dt) {
       las: 0.5 + 2.1 * up, ras: 0.5 + 2.1 * up, lasz: -(0.35 + 0.9 * f), rasz: 0.35 + 0.9 * f, lel: 0.5, rel: 0.5,
       spX: -0.12 - 0.25 * tuck + 0.08 * f, spY: 0, hipY: 0, bob: 0, bpX: -0.25 * r + 0.3 * f, headX: 0.1 * tuck });
   } else if (swim) {
-    swimPhase += dt * 5.5;
-    Object.assign(T, { lt: 0.25 * Math.sin(swimPhase * 2.4), rt: -0.25 * Math.sin(swimPhase * 2.4), lk: -0.3, rk: -0.3,
-      las: (swimPhase % (Math.PI * 2)), ras: ((swimPhase + Math.PI) % (Math.PI * 2)), lasz: -0.2, rasz: 0.2, lel: 0.3, rel: 0.3, spX: -0.9, spY: 0.25 * Math.sin(swimPhase), hipY: 0, bob: 0, bpX: 0, headX: 0.6 });
+    // front crawl: body flat on the water, arms windmill (reach, pull under, recover over the back), body rolls with each
+    // stroke, legs flutter-kick; the stroke rate rises with the run speed
+    swimPhase += dt * (4.2 + Math.max(0, speed - 12) * 0.18);
+    const a = -swimPhase, b = a - Math.PI, kick = Math.sin(swimPhase * 3);
+    Object.assign(T, { lt: 0.32 * kick, rt: -0.32 * kick, lk: -0.18 - 0.3 * Math.max(0, kick), rk: -0.18 - 0.3 * Math.max(0, -kick),
+      las: a, ras: b, lasz: -0.18, rasz: 0.18, lel: 0.2 + 1.1 * Math.max(0, -Math.sin(a)), rel: 0.2 + 1.1 * Math.max(0, -Math.sin(b)),
+      spX: 0, spY: 0.38 * Math.sin(swimPhase), hipY: -0.12 * Math.sin(swimPhase), bob: 0, bpX: 0, headX: -0.35 + 0.15 * Math.max(0, Math.sin(swimPhase * 0.5)) });
+    pivotRot = -1.42; pivotY = 0.62;
+  } else if (dive) {
+    // duck-dive under a float: streamlined, arms pointing ahead, dolphin kick; nose down, then back up
+    const u = 1 - player.roll / (player.rollT || ROLL_TIME), dk = Math.sin(u * Math.PI * 6);
+    Object.assign(T, { lt: 0.35 * dk, rt: 0.35 * dk, lk: -0.3 - 0.25 * Math.max(0, dk), rk: -0.3 - 0.25 * Math.max(0, dk), las: -Math.PI, ras: -Math.PI, lasz: -0.05, rasz: 0.05, lel: 0.05, rel: 0.05,
+      spX: 0, spY: 0, hipY: 0, bob: 0, bpX: 0, headX: 0.2 });
+    pivotRot = -1.42 - 0.45 * Math.sin(u * Math.PI * 2) * (u < 0.5 ? 1 : 0.6);
   } else {
     // running: stride cadence rises with speed; climbing a ladder lifts the knees and reaches the arms up
     const climb = !title && player.climb;
@@ -1743,7 +1823,10 @@ function setRunnerPose(dt) {
   // hat: hold it on, or reach up and catch it
   if ((air || rolling) && player.hatMode === 'hold') { T.ras = 2.75; T.rasz = -0.55; T.rel = 1.55; }
   if (hatFx && hatFx.free && hatFx.t > 0.12) { const w = smooth((hatFx.t - 0.12) / 0.15); T.ras = T.ras + (2.95 - T.ras) * w; T.rasz = T.rasz + (0.15 - T.rasz) * w; T.rel = T.rel + (0.25 - T.rel) * w; }
-  const k = swim ? 1 : Math.min(1, dt * 22);
+  if (!swim) for (const key of ['las', 'ras']) POSE[key] = Math.atan2(Math.sin(POSE[key]), Math.cos(POSE[key]));   // unwind the crawl's arm angles
+  if (swim && !R.wasSwim) { POSE.las = -swimPhase - Math.round((-swimPhase - POSE.las) / (Math.PI * 2)) * Math.PI * 2; POSE.ras = POSE.las - Math.PI; }
+  R.wasSwim = swim;
+  const k = Math.min(1, dt * (swim ? 30 : 22));
   for (const key in T) POSE[key] += (T[key] - POSE[key]) * k;
   R.L.thigh.rotation.x = POSE.lt; R.Rl.thigh.rotation.x = POSE.rt; R.L.knee.rotation.x = POSE.lk; R.Rl.knee.rotation.x = POSE.rk;
   R.aL.sh.rotation.set(POSE.las, 0, POSE.lasz); R.aR.sh.rotation.set(POSE.ras, 0, POSE.rasz);
@@ -1755,7 +1838,10 @@ function setRunnerPose(dt) {
     R.tail.rotation.x += (tx - R.tail.rotation.x) * Math.min(1, dt * 12);
     R.tail.rotation.z += (-POSE.spY * 1.4 - R.tail.rotation.z) * Math.min(1, dt * 12);
   }
-  R.pivot.rotation.x = pivotRot; R.pivot.position.y += (pivotY - R.pivot.position.y) * Math.min(1, dt * 25);
+  // the crawl and the dive tip the whole body flat; ease in and out of that, but a dry roll spins straight through
+  if (rolling && !dead) R.pivot.rotation.x = pivotRot;
+  else R.pivot.rotation.x = Math.atan2(Math.sin(R.pivot.rotation.x), Math.cos(R.pivot.rotation.x)), R.pivot.rotation.x += (pivotRot - R.pivot.rotation.x) * Math.min(1, dt * (dead ? 60 : swim || dive ? 9 : 14));
+  R.pivot.position.y += (pivotY - R.pivot.position.y) * Math.min(1, dt * 25);
   const wob = !title && !dead && player.stumble > 0 ? Math.sin(time * 26) * 0.1 * (player.stumble / 0.55) : 0;
   // whole body: lean and turn into lane changes, squash on landing
   const dx = title ? 0 : laneX(player.lane) - player.xw;
@@ -1794,11 +1880,20 @@ function popup(text, color, yPct = 40) {
 const POWERS = {
   magnet: { name: 'MAGNET',   base: 9,  per: 2, col: '#E53935', desc: 'Pulls in every coin nearby' },
   x2:     { name: '2X SCORE', base: 10, per: 2, col: '#F2A900', desc: 'Doubles every point you earn' },
-  jet:    { name: 'JETPACK',  base: 6,  per: 1, col: '#1E88E5', desc: 'Fly over everything, grab the sky coins' },
-  shield: { name: 'SHIELD',   base: 12, per: 3, col: '#00A884', desc: 'Survives one crash' }
+  jet:    { name: 'JETPACK',  base: 10, per: 1.5, col: '#1E88E5', desc: 'Soar above the clouds and over the house roof' },
+  shield: { name: 'SHIELD',   base: 12, per: 3, col: '#00A884', desc: 'Survives one crash' },
+  boots:  { name: 'SPRING BOOTS', short: 'BOOTS', base: 10, per: 2, col: '#8E44AD', desc: 'Giant bouncy jumps, straight onto van roofs' }
 };
 const UP_COST = [200, 450, 900, 1600, 3000], UP_MAX = UP_COST.length;
-const JET_H = 5.0;
+const JET_H = 9.0, JET_HI = 17.6;   // cruising height, and over the house roof (ridge 14.9)
+// flying height along the run: climbs well before the front gable, stays up over the roof, glides down over the backyard
+function flyH(s) {
+  const st = stageAt(s);
+  if (st.id === 'house') return JET_HI;
+  if (st.id === 'outdoor' && STAGES[(st.i + 1) % STAGES.length].id === 'house') return JET_H + (JET_HI - JET_H) * smooth(1 - (st.end - 18) / 50);
+  if (st.id === 'backyard') return JET_H + (JET_HI - JET_H) * smooth(1 - (st.local - 10) / 40);
+  return JET_H;
+}
 const PW_ICON = {}, PW_URL = {};
 function drawPowerIcon(g, k, S) {
   const c = S / 2, col = k === 'boost' ? '#8FA81E' : POWERS[k].col;
@@ -1820,6 +1915,12 @@ function drawPowerIcon(g, k, S) {
   } else if (k === 'shield') {
     g.fillStyle = '#fff'; g.beginPath(); g.moveTo(c, c - S * 0.27); g.lineTo(c + S * 0.21, c - S * 0.18); g.quadraticCurveTo(c + S * 0.21, c + S * 0.15, c, c + S * 0.29); g.quadraticCurveTo(c - S * 0.21, c + S * 0.15, c - S * 0.21, c - S * 0.18); g.closePath(); g.fill();
     g.fillStyle = col; g.beginPath(); g.ellipse(c, c, S * 0.065, S * 0.12, 0.5, 0, 7); g.fill();
+  } else if (k === 'boots') {
+    g.strokeStyle = '#fff'; g.lineWidth = S * 0.045; g.beginPath();
+    for (let i = 0; i <= 4; i++) { const y = c + S * 0.12 + i * S * 0.045; g.moveTo(c - S * 0.16, y); g.lineTo(c + S * 0.08, y + S * 0.02); }
+    g.stroke();
+    g.fillStyle = '#fff'; g.beginPath(); g.moveTo(c - S * 0.18, c - S * 0.28); g.lineTo(c - S * 0.02, c - S * 0.28); g.lineTo(c - S * 0.02, c - S * 0.05); g.lineTo(c + S * 0.2, c + S * 0.02);
+    g.quadraticCurveTo(c + S * 0.24, c + S * 0.1, c + S * 0.16, c + S * 0.1); g.lineTo(c - S * 0.2, c + S * 0.1); g.closePath(); g.fill();
   } else if (k === 'boost') {
     g.fillStyle = '#fff'; g.beginPath(); g.moveTo(c + S * 0.06, c - S * 0.3); g.lineTo(c - S * 0.16, c + S * 0.04); g.lineTo(c - S * 0.01, c + S * 0.04); g.lineTo(c - S * 0.07, c + S * 0.3); g.lineTo(c + S * 0.16, c - S * 0.05); g.lineTo(c + S * 0.01, c - S * 0.05); g.closePath(); g.fill();
   }
@@ -1895,6 +1996,11 @@ function sfx(n) {
     case 'mission': [523, 659, 784].forEach((f, i) => tone(f, 0.14, 'square', 0.1, 0, i * 0.11)); tone(1047, 0.5, 'square', 0.1, 0, 0.33); tone(523, 0.6, 'triangle', 0.15, 0, 0.33); break;
     case 'buy': tone(880, 0.08, 'square', 0.08); tone(1320, 0.18, 'square', 0.08, 0, 0.07); break;
     case 'click': tone(700, 0.05, 'square', 0.05); break;
+    case 'splash': noise(0.45, 0.35, 2600, 'bandpass', 500); noise(0.25, 0.15, 6000, 'highpass'); tone(180, 0.18, 'sine', 0.2, 70); break;
+    case 'stroke': noise(0.16, 0.07, 1800, 'bandpass', 900); break;
+    case 'boing': tone(180, 0.35, 'sine', 0.35, 720); tone(360, 0.25, 'triangle', 0.12, 900, 0.03); break;
+    case 'ring': { const f = 880 * Math.pow(2, Math.min(ringChain - 1, 12) / 12); tone(f, 0.12, 'triangle', 0.18); tone(f * 1.5, 0.3, 'sine', 0.14, 0, 0.06); tone(f * 2, 0.35, 'sine', 0.06, 0, 0.12); break; }
+    case 'takeoff': noise(0.9, 0.3, 300, 'lowpass', 2400); tone(120, 0.7, 'sawtooth', 0.12, 400); break;
   }
 }
 function jetSound(on) {
@@ -1939,7 +2045,7 @@ function setMuted(m) {
 const KEY_BANK = 'homer-camp-run-bank', KEY_UP = 'homer-camp-run-upgrades', KEY_MISS = 'homer-camp-run-missions', KEY_DAILY = 'homer-camp-run-daily', KEY_MUTE = 'homer-camp-run-mute';
 const loadJSON = (k, d) => { try { const v = JSON.parse(safeGet(k)); return v == null ? d : v; } catch (e) { return d; } };
 let bank = +safeGet(KEY_BANK) || 0;
-const ups = Object.assign({ magnet: 0, x2: 0, jet: 0, shield: 0 }, loadJSON(KEY_UP, {}));
+const ups = Object.assign({ magnet: 0, x2: 0, jet: 0, shield: 0, boots: 0 }, loadJSON(KEY_UP, {}));
 function addBank(n) { bank += n; safeSet(KEY_BANK, String(bank)); }
 const MTYPES = {
   coins:  { txt: n => `Collect ${n} coins in one run`,      run: true,  goal: l => 60 + l * 40 },
@@ -2002,7 +2108,8 @@ let state = 'loading', playerName = safeGet(KEY_NAME);
 let player, obstacles = [], coins = [], pickups = [], dist = 0, speed = 12, nextS = 22, pts = 0, coinCount = 0, boostT = 0;
 let bearD = 1, lastNear = -99, lastStage = 0, time = 0, countdown = 0, deathReason = '', shake = 0, camX = 0, camY = 3.3;
 let bear, camKick = 0, hudCoins = -1, graceT = 0, deathT = 0, jetCoinS = 0, jetLane = 1, lastPickupS = 0;
-const pw = { magnet: 0, x2: 0, jet: 0, shield: 0 };
+const pw = { magnet: 0, x2: 0, jet: 0, shield: 0, boots: 0 };
+let rings = [], ringChain = 0, lastRingT = -9, skyK = 0, jetSeg = 'line', jetSegEnd = 0, jetIdx = 0, wispT = 0;
 const scoreMult = () => MS.mult * (pw.x2 > 0 ? 2 : 1);
 const addPts = n => { pts += n * scoreMult(); };
 const score = () => Math.floor(pts);
@@ -2011,13 +2118,14 @@ function clearObjects() {
   for (const o of obstacles) world.remove(o.mesh);
   for (const c of coins) world.remove(c.mesh);
   for (const q of pickups) world.remove(q.mesh);
-  obstacles = []; coins = []; pickups = [];
+  for (const r of rings) world.remove(r.mesh);
+  obstacles = []; coins = []; pickups = []; rings = [];
 }
 function reset() {
   clearObjects();
   player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false, lift: false, ladder: false, sq: 0, wasAir: false };
   dist = 0; speed = 12; nextS = 22; pts = 0; coinCount = 0; boostT = 0;
-  bearD = 1; lastNear = -99; lastStage = 0; time = 0; countdown = 0; shake = 0; graceT = 0; deathT = 0; lastPickupS = 0; runStat = {};
+  bearD = 1; lastNear = -99; lastStage = 0; time = 0; countdown = 0; shake = 0; graceT = 0; deathT = 0; lastPickupS = 0; runStat = {}; swimY = 0; wasWet = false;
   for (const k in pw) pw[k] = 0; jetSound(false);
   if (runner) { runner.visible = true; R.pivot.rotation.x = 0; }
   rebuildChunks();
@@ -2031,7 +2139,13 @@ function rebuildChunks() {
 }
 
 // ---- actions ----
-function jump() { if (!player.airborne && !player.jetting) { const T = airTime(speed); player.roll = 0; player.airborne = true; player.v0 = 4 * APEX / T; player.g = 8 * APEX / (T * T); player.vh = player.v0; pickHatMode(false); sfx('jump'); mEvent('jumps'); } }   // jumping cancels a roll
+function jump() {
+  if (player.airborne || player.jetting) return;
+  const boots = pw.boots > 0, A = boots ? 4.6 : APEX, T = airTime(speed) * (boots ? 1.5 : 1);
+  player.roll = 0; player.airborne = true; player.v0 = 4 * A / T; player.g = 8 * A / (T * T); player.vh = player.v0; pickHatMode(false);
+  sfx(boots ? 'boing' : 'jump'); mEvent('jumps');
+  if (boots) for (let i = 0; i < 10; i++) { const a = i / 10 * Math.PI * 2; spawnPart({ x: player.xw + Math.cos(a) * 0.3, s: dist + Math.sin(a) * 0.3, y: player.h + 0.1, vx: Math.cos(a) * 2.5, vz: Math.sin(a) * 2.5, size: 0.3, grow: 1.5, life: 0.4, color: 0xC79BE0, op: 0.8 }); }
+}   // jumping cancels a roll   // jumping cancels a roll
 function rollDown() {
   if (player.jetting) return;
   sfx('roll'); mEvent('rolls');
@@ -2215,11 +2329,21 @@ function addObstacle(type, lane, s, opts = {}) {
 }
 function addCoin(lane, s, h) { const mesh = buildCoin(); world.add(mesh); coins.push({ lane, s, h, x: laneX(lane), mesh, got: false }); }
 // power-up pickups: about one every 150-250 m, in a lane that's free at that row; no jetpack if the house is coming up
-function canJet(s) { for (let d = 0; d < 340; d += 10) if (stageAt(s + d).id === 'house') return false; return true; }
+function canJet(s) { const st = stageAt(s); if (st.id === 'house') return false; return !(st.id === 'outdoor' && STAGES[(st.i + 1) % STAGES.length].id === 'house' && st.end < 110); }
+const overHouse = s => { const st = stageAt(s); return st.id === 'house' || stageAt(s + 30).id === 'house' || (st.id === 'backyard' && st.local < 15); };
+let ringGeo = null;
+function addRing(lane, s, h) {
+  ringGeo = ringGeo || new THREE.TorusGeometry(1.2, 0.13, 12, 40);
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(ringGeo, mat('skyring', { color: 0xFFD54A, emissive: 0xFF9E00, emissiveIntensity: 1.1, metalness: 0.7, roughness: 0.25 })));
+  const glow = new THREE.Mesh(pwParts.halo || (pwParts.halo = new THREE.CircleGeometry(1.0, 32)), new THREE.MeshBasicMaterial({ map: softTex, color: 0xFFC94A, transparent: true, opacity: 0.35, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  glow.scale.setScalar(2.1); glow.position.z = -0.05; g.add(glow);
+  world.add(g); rings.push({ lane, s, h, mesh: g, got: false });
+}
 function addPickup(k, lane, s) { const mesh = buildPickup(k); world.add(mesh); pickups.push({ k, lane, s, h: 0, mesh, got: false }); }
 function maybePickup(s, freeLanes) {
   if (!freeLanes.length || s < 160 || s - lastPickupS < 150 + Math.random() * 100) return;
-  const bag = ['magnet', 'magnet', 'magnet', 'x2', 'x2', 'shield', 'shield']; if (canJet(s)) bag.push('jet', 'jet', 'jet');
+  const bag = ['magnet', 'magnet', 'magnet', 'x2', 'x2', 'shield', 'shield', 'boots', 'boots']; if (canJet(s)) bag.push('jet', 'jet', 'jet', 'jet');
   const k = bag[Math.floor(Math.random() * bag.length)], lane = freeLanes[Math.floor(Math.random() * freeLanes.length)];
   coins = coins.filter(c => { const hit = c.lane === lane && Math.abs(c.s - (s + 3)) < 1.6; if (hit) world.remove(c.mesh); return !hit; });
   addPickup(k, lane, s + 3); lastPickupS = s;
@@ -2317,16 +2441,31 @@ function update(dt) {
   const si = stageAt(dist);
   if (si.i !== lastStage) { lastStage = si.i; popup(STAGES[si.i].name, '#2E7D32', 30); }
 
-  // jetpack: rise to cruising height and fly over everything along a trail of sky coins; cut short before the house door
-  if (pw.jet > 0 && stageAt(dist + 50).id === 'house') pw.jet = 0;
+  // jetpack: blast up above the clouds and fly over everything, the house roof included, through coin formations and
+  // gold sky rings; it never runs out over the roof, you always glide down past the house
+  if (player.jetting && pw.jet < 0.05 && overHouse(dist)) pw.jet = 0.05;
   if (pw.jet > 0) {
-    if (!player.jetting) { player.jetting = true; jetCoinS = dist + 18; jetLane = player.lane; jetSound(true); }
+    if (!player.jetting) { player.jetting = true; jetCoinS = dist + 26; jetSegEnd = 0; jetLane = player.lane; jetSound(true); sfx('takeoff'); popup('UP, UP AND AWAY!', '#1E88E5', 44); }
     player.airborne = true; player.roll = 0; player.vh = 0;
-    player.h += (JET_H - player.h) * Math.min(1, dt * 2.6);
-    while (jetCoinS < dist + Math.min(90, pw.jet * speed - 10)) {
-      if (Math.random() < 0.12) jetLane = clamp(jetLane + (Math.random() < 0.5 ? -1 : 1), 0, 2);
-      addCoin(jetLane, jetCoinS, JET_H); jetCoinS += 2.4;
+    player.h += (flyH(dist) - player.h) * Math.min(1, dt * 2.2);
+    let flyEnd = dist + pw.jet * speed; while (overHouse(flyEnd)) flyEnd += 10;
+    while (jetCoinS < Math.min(dist + 130, flyEnd - 12)) {
+      if (jetCoinS >= jetSegEnd) {          // next formation: a line, a zigzag, a three-lane coin carpet or a wave, opened by a sky ring
+        jetSeg = ['line', 'zig', 'carpet', 'wave', 'zig'][Math.floor(Math.random() * 5)]; jetIdx = 0;
+        jetSegEnd = jetCoinS + (jetSeg === 'carpet' ? 22 : 34 + Math.random() * 14);
+        if (jetSeg === 'line' || jetSeg === 'wave') jetLane = Math.floor(Math.random() * 3);
+        if (jetSeg !== 'carpet') addRing(jetLane, jetCoinS, flyH(jetCoinS));
+        jetCoinS += 5; continue;
+      }
+      const h = flyH(jetCoinS);
+      if (jetSeg === 'zig') jetLane = [0, 1, 2, 1][Math.floor(jetIdx / 4) % 4];
+      if (jetSeg === 'carpet') for (let l = 0; l < 3; l++) addCoin(l, jetCoinS, h);
+      else addCoin(jetLane, jetCoinS, h + (jetSeg === 'wave' ? Math.sin(jetIdx * 0.55) * 0.7 : 0));
+      jetIdx++; jetCoinS += 2.4;
     }
+    wispT -= dt;
+    if (wispT <= 0) { wispT = 0.5 + Math.random() * 0.5; const sd = Math.random() < 0.5 ? -1 : 1;
+      spawnPart({ x: player.xw + sd * (3.5 + Math.random() * 5), s: dist + 70, y: player.h + (Math.random() - 0.2) * 3, size: 2.5 + Math.random() * 2.5, grow: 0.3, life: 4, color: 0xFFFFFF, op: 0.28 }); }
   } else if (player.jetting) {      // out of fuel: float back down, safe for a moment after landing
     player.jetting = false; player.airborne = true; player.vh = 0; player.g = GRAV * 0.55; player.v0 = JUMP_V; graceT = 2.4; jetSound(false);
     popup('LANDING!', '#1E88E5', 44);
@@ -2401,11 +2540,132 @@ function update(dt) {
       for (let i = 0; i < 3; i++) sparkle(laneX(q.lane), q.s, 0.8 + i * 0.3);
     }
   }
+  for (const r of rings) {
+    if (!r.got && r.lane === player.lane && Math.abs(r.s - dist) < 0.9 && Math.abs(r.h - player.h) < 1.6) {
+      r.got = true; ringChain = time - lastRingT < 4 ? ringChain + 1 : 1; lastRingT = time;
+      addPts(50 * ringChain); sfx('ring'); popup(ringChain > 1 ? `RING COMBO x${ringChain}!` : 'SKY RING +50', '#F2A900', 36);
+      for (let i = 0; i < 3; i++) sparkle(laneX(r.lane), r.s, r.h + 0.4 + i * 0.4);
+    }
+  }
+  rings = rings.filter(r => { const keep = r.s - dist > -6; if (!keep) world.remove(r.mesh); return keep; });
   obstacles = obstacles.filter(o => { const keep = o.s + o.half - dist > -14; if (!keep) world.remove(o.mesh); return keep; });
   coins = coins.filter(c => { const keep = !c.got && c.s - dist > -8; if (!keep) world.remove(c.mesh); return keep; });
   pickups = pickups.filter(q => { const keep = !q.got && q.s - dist > -8; if (!keep) world.remove(q.mesh); return keep; });
 
   if (time - lastNear > 2.5) bearD = Math.min(1, bearD + dt * 0.12);
+}
+
+// ================= THE SKY (seen from the jetpack) =================
+// a cloud layer drifting under and around the flight path, HOMER hot-air balloons, and a flock of birds.
+// Clouds and birds fade in only while flying, so they never block the view from the ground.
+const SKY = { clouds: [], balloons: [], birds: null };
+const cloudMat = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, emissive: 0x9DB4C8, emissiveIntensity: 0.35, roughness: 1, flatShading: true, transparent: true, opacity: 0 });
+function placeCloud(c, s) {
+  const st = stageAt(s), nearHouse = st.id === 'house' || stageAt(s + 25).id === 'house' || (st.id === 'backyard' && st.local < 30);
+  const under = !nearHouse && Math.random() < 0.45;
+  c.s = s; c.under = under;
+  c.x = under ? (Math.random() < 0.5 ? -1 : 1) * (2 + Math.random() * 16) : (Math.random() < 0.5 ? -1 : 1) * ((nearHouse ? 19 : 10) + Math.random() * 24);
+  c.dy = under ? -(4.5 + Math.random() * 3) : -2 + Math.random() * 7;
+  const k = under ? 0.8 + Math.random() * 0.8 : 0.9 + Math.random() * 1.4; c.g.scale.set(k * (1.2 + Math.random() * 0.6), k * 0.65, k);
+}
+function buildSky() {
+  const geo = new THREE.IcosahedronGeometry(1.6, 1);
+  for (let i = 0; i < 30; i++) {
+    const g = new THREE.Group();
+    const n = 5 + Math.floor(Math.random() * 3);
+    for (let j = 0; j < n; j++) { const m = new THREE.Mesh(geo, cloudMat); const a = j / n * Math.PI * 2; m.position.set(Math.cos(a) * (1.3 + Math.random()), (Math.random() - 0.3) * 0.9, Math.sin(a) * (0.9 + Math.random() * 0.6)); m.scale.setScalar(0.8 + Math.random() * 0.7); g.add(m); }
+    g.add(at(new THREE.Mesh(geo, cloudMat), 0, 0.6, 0)); g.children[g.children.length - 1].scale.setScalar(1.5);
+    g.visible = false; scene.add(g);
+    const c = { g }; placeCloud(c, i * 7 - 20); SKY.clouds.push(c);
+  }
+  // HOMER hot-air balloons: green and white panels with the emblem, a wicker basket on ropes
+  const env = img('homer-emblem');
+  const bTex = canvasTex(512, 256, (c, w, h) => {
+    for (let i = 0; i < 12; i++) { c.fillStyle = ['#2E7D32', '#FFFFFF', '#6DBE45', '#FFFFFF'][i % 4]; c.fillRect(i * w / 12, 0, w / 12 + 1, h); }
+    c.fillStyle = '#C6D62C'; c.fillRect(0, h * 0.62, w, h * 0.08);
+    if (env) for (const x of [w * 0.125, w * 0.625]) { c.fillStyle = '#fff'; c.beginPath(); c.arc(x, h * 0.42, 34, 0, 7); c.fill(); c.drawImage(env, x - 30, h * 0.42 - 30, 60, 60); }
+  }, 'balloon-tex');
+  const envM = new THREE.MeshStandardMaterial({ map: bTex, roughness: 0.6 }), basket = mat('basket', { color: 0x9C6B3C, roughness: 0.9 }), rope = mat('rope', { color: 0x5A4632 });
+  for (let i = 0; i < 6; i++) {
+    const g = new THREE.Group();
+    const env3 = new THREE.Mesh(new THREE.SphereGeometry(3.2, 24, 18), envM); env3.scale.set(1, 1.18, 1); env3.position.y = 5.2; g.add(env3);
+    const skirt = new THREE.Mesh(new THREE.CylinderGeometry(1.2, 0.7, 1.4, 16, 1, true), envM); skirt.position.y = 1.7; g.add(skirt);
+    g.add(at(box(1.2, 0.9, 1.2, basket, 0.08), 0, 0, 0));
+    for (const [x, z] of [[-0.5, -0.5], [0.5, -0.5], [-0.5, 0.5], [0.5, 0.5]]) { const r = at(cyl(0.02, 0.02, 1.5, rope, 4), x * 1.1, 0.95, z * 1.1); g.add(r); }
+    const flame = new THREE.Mesh(new THREE.ConeGeometry(0.22, 0.6, 8), mat('balloonflame', { color: 0xFFB020, emissive: 0xFF6A00, emissiveIntensity: 3 })); flame.position.y = 0.9; g.add(flame);
+    scene.add(g);
+    SKY.balloons.push({ g, s: 60 + i * 70 + Math.random() * 40, x: (i % 2 ? 1 : -1) * (16 + Math.random() * 22), y: 13 + Math.random() * 9, ph: Math.random() * 7, sp: 0.6 + Math.random() * 0.8 });
+  }
+  // birds: a little V of gulls, wings flapping
+  const flock = new THREE.Group(), wingGeo = new THREE.BufferGeometry();
+  wingGeo.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, -0.15, 0, 0, 0.15, 0.7, 0.05, 0.05], 3)); wingGeo.computeVertexNormals();
+  const birdM = new THREE.MeshStandardMaterial({ color: 0xFFFFFF, side: THREE.DoubleSide, roughness: 0.8, transparent: true, opacity: 0 });
+  flock.userData.wings = [];
+  for (let i = 0; i < 7; i++) {
+    const b = new THREE.Group(), row = Math.ceil(i / 2), sd = i % 2 ? 1 : -1;
+    b.position.set(i ? sd * row * 1.1 : 0, Math.random() * 0.3, row * 1.0);
+    const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.08, 0.35, 3, 6), birdM); body.rotation.x = Math.PI / 2; b.add(body);
+    for (const w of [-1, 1]) { const m = new THREE.Mesh(wingGeo, birdM); m.scale.x = w; b.add(m); flock.userData.wings.push({ m, w, ph: i * 0.7 }); }
+    flock.add(b);
+  }
+  flock.userData.mat = birdM; flock.visible = false; scene.add(flock); SKY.birds = { g: flock, s: 120, x: -20, vx: 3 };
+}
+function updateSky(dt, viewDist) {
+  const k = skyK, show = k > 0.02;
+  cloudMat.opacity = 0.92 * k; cloudMat.depthWrite = k > 0.9;
+  for (const c of SKY.clouds) {
+    if (c.s < viewDist - 12) placeCloud(c, viewDist + 140 + Math.random() * 70);
+    c.g.visible = show;
+    if (show) { c.g.position.set(c.x + Math.sin(time * 0.2 + c.s) * 0.5, flyH(c.s) + c.dy, -(c.s - viewDist)); }
+  }
+  for (const b of SKY.balloons) {
+    if (b.s < viewDist - 20) { b.s = viewDist + 260 + Math.random() * 120; b.x = (Math.random() < 0.5 ? -1 : 1) * (16 + Math.random() * 22); b.y = 13 + Math.random() * 9; }
+    b.ph += dt; b.g.position.set(b.x + Math.sin(b.ph * 0.3) * 1.5, b.y + Math.sin(b.ph * b.sp) * 0.6 + (stageAt(b.s).id === 'house' ? 6 : 0), -(b.s - viewDist)); b.g.rotation.y = b.ph * 0.15;
+  }
+  const B = SKY.birds; B.g.visible = show; B.g.userData.mat.opacity = k;
+  if (show) {
+    B.x += B.vx * dt; if (B.s < viewDist - 10 || Math.abs(B.x) > 40) { B.s = viewDist + 90 + Math.random() * 60; B.x = (Math.random() < 0.5 ? -1 : 1) * 30; B.vx = -Math.sign(B.x) * (3 + Math.random() * 3); }
+    B.g.position.set(B.x, flyH(B.s) + 2.5, -(B.s - viewDist)); B.g.rotation.y = B.vx > 0 ? -Math.PI / 2 : Math.PI / 2;
+    for (const w of B.g.userData.wings) w.m.rotation.z = w.w * Math.sin(time * 9 + w.ph) * 0.6;
+  }
+}
+
+// ================= SWIMMING EFFECTS =================
+const SWIM_Y = 0.86, WATER_Y = -0.12;
+let swimY = 0, wasWet = false, strokeT = 0, wakeT = 0, bubbleT = 0;
+function splashBurst(x, s, n, big) {
+  for (let i = 0; i < n; i++) {
+    const a = Math.random() * Math.PI * 2, r = Math.random();
+    spawnPart({ x: x + Math.cos(a) * 0.3, s: s + Math.sin(a) * 0.3, y: WATER_Y + 0.05, vx: Math.cos(a) * (1 + r * 2.2), vz: Math.sin(a) * (1 + r * 1.5), vy: (big ? 4.5 : 3) + Math.random() * 2.5, g: 14,
+      size: 0.16 + Math.random() * 0.14, grow: 0.4, life: 0.55 + Math.random() * 0.25, color: 0xF4FCFF, op: 0.95 });
+  }
+  for (let i = 0; i < (big ? 6 : 3); i++) spawnPart({ x: x + (Math.random() - 0.5) * 0.8, s: s + (Math.random() - 0.5) * 0.8, y: WATER_Y + 0.1, vy: 0.6, size: 0.6, grow: 2.2, life: 0.6, color: 0xFFFFFF, op: 0.55 });
+}
+function swimFx(dt, wet) {
+  const x = player.xw;
+  if (wet && !wasWet) { splashBurst(x, dist, 26, true); sfx('splash'); shake = Math.max(shake, 0.12); }          // jumped or ran in
+  if (!wet && wasWet && player.airborne && inPool(dist)) { splashBurst(x, dist, 14, false); sfx('splash'); }       // leapt out of the water
+  if (!wet && wasWet && !inPool(dist)) for (let i = 0; i < 8; i++) spawnPart({ x: x + (Math.random() - 0.5) * 0.5, s: dist, y: 1 + Math.random(), vy: -1, g: 9, size: 0.1, grow: 0, life: 0.5, color: 0xBFEFFF, op: 0.9 });   // dripping on the deck
+  wasWet = wet;
+  if (!wet) return;
+  if (player.roll > 0) {          // under the surface: a stream of bubbles
+    bubbleT -= dt; if (bubbleT <= 0) { bubbleT = 0.035; spawnPart({ x: x + (Math.random() - 0.5) * 0.4, s: dist + Math.random() * 0.8, y: WATER_Y - 0.6 - Math.random() * 0.5, vy: 2.2 + Math.random(), size: 0.12, grow: 0.6, life: 0.4, color: 0xE8FAFF, op: 0.85 }); }
+    return;
+  }
+  // hand entries: a splash ahead of the head on each arm's catch, a soft stroke sound
+  const ph = swimPhase % Math.PI, prev = strokeT; strokeT = ph;
+  if (ph < prev) {
+    const side = Math.floor(swimPhase / Math.PI) % 2 ? 1 : -1;
+    for (let i = 0; i < 7; i++) spawnPart({ x: x + side * 0.32 + (Math.random() - 0.5) * 0.2, s: dist + 1.15, y: WATER_Y + 0.05, vx: (Math.random() - 0.5) * 1.2, vz: -1 - Math.random(), vy: 2 + Math.random() * 1.8, g: 13, size: 0.13, grow: 0.3, life: 0.45, color: 0xF4FCFF, op: 0.95 });
+    sfx('stroke');
+  }
+  // flutter-kick spray behind and a foamy V wake trailing off
+  wakeT -= dt;
+  if (wakeT <= 0) {
+    wakeT = 0.05;
+    spawnPart({ x: x + (Math.random() - 0.5) * 0.4, s: dist - 1.05, y: WATER_Y + 0.08, vy: 1.6 + Math.random() * 1.4, vz: -2, g: 12, size: 0.14, grow: 0.5, life: 0.35, color: 0xFFFFFF, op: 0.9 });
+    for (const sd of [-1, 1]) spawnPart({ x: x + sd * 0.45, s: dist - 0.6, y: WATER_Y + 0.03, vx: sd * 1.1, vz: -speed * 0.15, size: 0.38, grow: 2.4, life: 0.9, color: 0xFFFFFF, op: 0.42 });
+  }
 }
 
 // ================= SYNC SCENE TO STATE =================
@@ -2426,6 +2686,9 @@ function syncScene(dt, viewDist) {
     if (o.type === 'wagon' && o.mesh.userData.ring) o.mesh.userData.ring.material.opacity = 0.5 + 0.4 * Math.sin(time * 8);
   }
   for (const c of coins) { c.mesh.visible = !c.got && c.s - viewDist > -0.8; c.mesh.position.set(c.x, c.h + 0.45, -(c.s - viewDist)); c.mesh.rotation.y = time * 3 + c.s; }
+  for (const r of rings) { r.mesh.visible = !r.got; r.mesh.position.set(laneX(r.lane), r.h + 1.0, -(r.s - viewDist)); r.mesh.rotation.z = time * 0.8 + r.s; }
+  skyK += ((player.jetting && state !== 'title' ? 1 : 0) - skyK) * Math.min(1, dt * 1.6);
+  updateSky(dt, viewDist);
   for (const q of pickups) {
     q.mesh.visible = !q.got; q.mesh.position.set(laneX(q.lane), 0.95 + Math.sin(time * 3 + q.s) * 0.12, -(q.s - viewDist));
     q.mesh.userData.spin.rotation.y = Math.sin(time * 2.2 + q.s) * 0.7; const k = 1 + Math.sin(time * 6 + q.s) * 0.12; q.mesh.userData.halo.scale.set(k, k, 1);
@@ -2433,9 +2696,15 @@ function syncScene(dt, viewDist) {
 
   // runner
   if (state === 'over') { deathT += dt; const fl = rampUnder(); if (player.h > fl) player.h = Math.max(fl, player.h - dt * 9); }
-  const swimming = state !== 'title' && inPool(viewDist);
-  const sink = swimming ? (player.roll > 0 ? 1.9 : (player.airborne ? 0 : 0.95)) : 0;
-  runner.position.set(player.xw, player.h - sink, 0);
+  const swimming = state !== 'title' && inPool(viewDist) && !player.jetting;
+  const wetNow = swimming && !player.airborne;
+  // how far the body sits below the deck: flat on the surface for the crawl, a dip under for the dive, eased both ways
+  let sinkT = 0;
+  if (wetNow) { if (player.roll > 0) { const u = 1 - player.roll / (player.rollT || ROLL_TIME); sinkT = SWIM_Y + 1.05 * Math.sin(Math.PI * clamp(u * 1.15, 0, 1)); } else sinkT = SWIM_Y; }
+  swimY += (sinkT - swimY) * Math.min(1, dt * (sinkT > swimY ? 7 : 12));
+  const bobY = wetNow && player.roll <= 0 ? 0.05 * Math.sin(time * 4.4) : 0;
+  runner.position.set(player.xw, player.h - swimY + bobY, 0);
+  if (state === 'play') swimFx(dt, wetNow);
   setRunnerPose(dt);
   const GR = runner.userData.gear, live = state === 'play' || state === 'paused';
   if (GR) {
@@ -2448,6 +2717,8 @@ function syncScene(dt, viewDist) {
     const blink = t => t > 2 || Math.sin(time * 20) > 0;
     GR.sh.visible = live && pw.shield > 0 && blink(pw.shield);
     if (GR.sh.visible) { GR.sh.rotation.y += dt * 0.8; GR.sh.scale.setScalar(1 + Math.sin(time * 6) * 0.03); }
+    GR.bt.visible = live && pw.boots > 0 && blink(pw.boots) && !player.jetting;
+    if (GR.bt.visible) GR.bt.scale.y = player.airborne ? 1.6 : 1 + Math.abs(Math.sin(runPhase)) * 0.4;
     GR.mg.visible = live && pw.magnet > 0 && blink(pw.magnet);
     if (GR.mg.visible) { GR.mg.position.y = 2.35 + Math.sin(time * 4) * 0.08; GR.mg.rotation.z = Math.sin(time * 3) * 0.25; }
   }
@@ -2457,8 +2728,8 @@ function syncScene(dt, viewDist) {
   sh.visible = !swimming;
   sh.position.y = 0.04 + floorH - player.h;
   const ss = Math.max(0.4, 1 - (player.h - floorH) / 4); sh.scale.set(0.55 * ss, 0.35 * ss, 1);
-  splash.visible = swimming && !player.airborne && player.roll <= 0;
-  if (splash.visible) { splash.position.y = sink - 0.1; const k = 1 + 0.15 * Math.sin(time * 12); splash.scale.set(k, k, 1); }
+  splash.visible = wetNow && player.roll <= 0 && swimY > 0.4;
+  if (splash.visible) { splash.position.set(0, swimY - bobY - 0.1, 0.1); const k = 1 + 0.12 * Math.sin(time * 9); splash.scale.set(1.05 * k, 2.0 * k, 1); splash.material.opacity = 0.45; }
   if (waterTex) { waterTex.offset.y = (waterTex.offset.y + dt * 0.12) % 1; waterTex.offset.x = Math.sin(time * 0.7) * 0.03; }
   for (const o of obstacles) if (o.mesh.userData.bob) o.mesh.userData.bob.position.y = (o.type === 'float' && o.mesh.userData.bob.isMesh && o.mesh.userData.bob.geometry.type === 'TorusGeometry' ? 0.15 : -0.35) + Math.sin(time * 3 + o.s) * 0.08;
   volleyBalls.forEach((b, i) => { const t = (time * 0.55 + i * 0.3) % 1, dir = Math.floor(time * 0.55 + i * 0.3) % 2; const u = dir ? t : 1 - t; b.position.set(-2.2 + 4.6 * u, 1.9 + Math.sin(t * Math.PI) * 2.4, 0.3 - 0.7 * u); });
@@ -2494,16 +2765,20 @@ function syncScene(dt, viewDist) {
   // indoors the camera stays under the ceiling, and it ducks under the door frame on the way in and out
   const sc = dist - CAM.z, ahead = stageAt(sc + 12), here = stageAt(sc);
   const atDoor = (ahead.id === 'house' && ahead.local < 15) || (here.id === 'house' && here.end < 12) || (here.id === 'backyard' && here.local < 3);
-  const cap = atDoor ? 3.9 : here.id === 'house' ? HALL_H - 1.2 : 99;
-  const targetY = Math.min(cap, CAM.y + Math.max(0, player.h) * 0.55);
+  const high = player.h > HALL_H || skyK > 0.05;
+  const cap = high ? 99 : atDoor ? 3.9 : here.id === 'house' ? HALL_H - 1.2 : 99;
+  // flying: ride just above and behind the runner so the clouds, roof and rings fill the view
+  const groundY = CAM.y + Math.max(0, player.h) * 0.55, skyY = player.h + 3.4;
+  const targetY = Math.min(cap, groundY + (skyY - groundY) * skyK);
   camY += (targetY - camY) * Math.min(1, dt * (camY > targetY + 0.3 ? 9 : 5));
   let sx = 0, sy = 0;
   if (shake > 0) { shake = Math.max(0, shake - dt); sx = (Math.random() - 0.5) * shake * 0.6; sy = (Math.random() - 0.5) * shake * 0.6; }
   camKick = Math.max(0, camKick - dt * 0.9);
   camera.position.set(camX + sx, camY + sy - camKick, CAM.z);
-  camera.lookAt(camX * 0.85, CAM.ly + player.h * 0.45, CAM.lz);
+  camera.lookAt(camX * 0.85, (CAM.ly + player.h * 0.45) * (1 - skyK) + (player.h - 1.6) * skyK, CAM.lz);
+  if (window.__cam) { const c = window.__cam; camera.position.set(player.xw + c[0], c[1], c[2]); camera.lookAt(player.xw, c[3], c[4]); }   // test hook: side views
   // the track curves gently left and right as you run, and always rolls away over a rise
-  const inHouse = stageAt(viewDist).id === 'house';
+  const inHouse = stageAt(viewDist).id === 'house' && skyK < 0.5;
   const bx = 0.0042 * Math.sin(dist / 170) + 0.0012 * Math.sin(dist / 67 + 1.3);
   BEND.value.x += ((inHouse ? 0.5 : 1) * bx - BEND.value.x) * Math.min(1, dt * 2);
   BEND.value.y += ((inHouse ? 0 : 0.0016) - BEND.value.y) * Math.min(1, dt * 2);
@@ -2511,13 +2786,13 @@ function syncScene(dt, viewDist) {
   camera.fov += (fovT - camera.fov) * Math.min(1, dt * 3); camera.updateProjectionMatrix();
 
   // fog and horizon follow the stage
-  const sid = stageAt(viewDist).id;
+  const sid = skyK > 0.5 ? 'outdoor' : stageAt(viewDist).id;
   tmpCol.set(FOG[sid]); fogCol.lerp(tmpCol, Math.min(1, dt * 1.5));
   scene.fog.color.copy(fogCol); scene.background.copy(fogCol);
-  scene.fog.near = sid === 'house' ? 40 : 70; scene.fog.far = sid === 'house' ? 140 : 210;
+  scene.fog.near = sid === 'house' ? 40 : 70 + 40 * skyK; scene.fog.far = sid === 'house' ? 140 : 210 + 110 * skyK;
   hemi.intensity = sid === 'house' ? 1.05 : 0.75;
   horizon.position.set(camera.position.x * 0.98, horizon.userData.h / 2 - 10, -380);
-  horizon.visible = sid !== 'house' || stageAt(viewDist).end < 40;
+  horizon.visible = sid !== 'house' || stageAt(viewDist).end < 40 || skyK > 0.05;
 
   // HUD
   if (state === 'play' || state === 'paused') {
@@ -2569,11 +2844,11 @@ function frame(ts) {
 }
 
 // ================= BOOT =================
-const PW_KEYS = ['jet', 'magnet', 'x2', 'shield', 'boost'];
-pwUI.innerHTML = PW_KEYS.map(k => `<div class="pwp" id="pp-${k}"><img src="${PW_URL[k]}" alt=""><span>${k === 'boost' ? 'SPEED' : POWERS[k].name}</span><i><b id="pb-${k}" style="background:${k === 'boost' ? '#C6D62C' : POWERS[k].col}"></b></i></div>`).join('');
+const PW_KEYS = ['jet', 'boots', 'magnet', 'x2', 'shield', 'boost'];
+pwUI.innerHTML = PW_KEYS.map(k => `<div class="pwp" id="pp-${k}"><img src="${PW_URL[k]}" alt=""><span>${k === 'boost' ? 'SPEED' : POWERS[k].short || POWERS[k].name}</span><i><b id="pb-${k}" style="background:${k === 'boost' ? '#C6D62C' : POWERS[k].col}"></b></i></div>`).join('');
 loadImages().then(() => {
   resize();
-  buildHorizon(); buildRunner(safeGet(KEY_CHAR) || CHARS[0].id); renderCharThumbs(); buildAmbient(); bear = buildBear(); bear.visible = false; scene.add(bear);
+  buildHorizon(); buildRunner(safeGet(KEY_CHAR) || CHARS[0].id); renderCharThumbs(); buildAmbient(); buildSky(); bear = buildBear(); bear.visible = false; scene.add(bear);
   player = { lane: 1, xw: 0, h: 0, vh: 0, airborne: false, roll: 0, onRamp: false, climb: false, lift: false, ladder: false, sq: 0, wasAir: false };
   rebuildChunks();
   $('loading').remove();

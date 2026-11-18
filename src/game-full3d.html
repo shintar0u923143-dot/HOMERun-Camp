@@ -1807,7 +1807,16 @@ function setRunnerPose(dt) {
   const rolling = !title && player.roll > 0 && !dive, air = !title && player.airborne;
   let pivotRot = 0, pivotY = 0.62;
   const dead = state === 'over', jet = !!(!title && !dead && player.jetting);
-  if (dead) {           // knocked back off your feet, arms flung up
+  const intro = state === 'intro' && introT < INTRO_LEN;
+  let hy = 0;
+  if (intro && introT < INTRO_UP) {          // sitting on the log, marshmallow out over the fire; turns to look back at the roar
+    Object.assign(T, { lt: 1.45, rt: 1.35, lk: -1.55, rk: -1.45, las: 0.55, ras: 0.95 + 0.07 * Math.sin(time * 2.5), lasz: -0.25, rasz: 0.05, lel: 0.9, rel: 0.55,
+      spX: -0.22, spY: 0, hipY: 0, bob: 0, bpX: 0, headX: introT < INTRO_SEE ? 0.2 : -0.1 });
+    if (introT >= INTRO_SEE) hy = 1.9;
+  } else if (intro) {                        // leaps up, arms flung high, still staring at the bear
+    Object.assign(T, { lt: -0.15, rt: 0.35, lk: -0.3, rk: -0.6, las: 2.7, ras: 2.5, lasz: -0.7, rasz: 0.7, lel: 0.4, rel: 0.4, spX: 0.25, spY: 0, hipY: 0, bob: 0, bpX: 0, headX: -0.25 });
+    hy = 1.2;
+  } else if (dead) {           // knocked back off your feet, arms flung up
     const u = smooth(deathT / 0.35);
     Object.assign(T, { lt: 1.1 * u, rt: 0.5 * u, lk: -0.4, rk: -0.9 * u, las: 2.7, ras: 2.5, lasz: -0.9, rasz: 0.9, lel: 0.3, rel: 0.4, spX: 0.35 * u, spY: 0, hipY: 0, bob: 0, bpX: 0, headX: -0.4 * u });
     pivotRot = 1.35 * u; pivotY = 0.62 - 0.3 * u;
@@ -1870,6 +1879,7 @@ function setRunnerPose(dt) {
   R.aL.el.rotation.x = POSE.lel; R.aR.el.rotation.x = POSE.rel;
   R.spine.rotation.set(POSE.spX, POSE.spY, 0); R.hips.rotation.y = POSE.hipY; R.hips.position.y = 0.84 + POSE.bob;
   R.bp.rotation.x = POSE.bpX; R.head.rotation.x = POSE.headX;
+  headYaw += (hy - headYaw) * Math.min(1, dt * (hy ? 14 : 8)); R.head.rotation.y = headYaw;
   if (R.tail) {   // the ponytail swings with the stride, streams back in the air, whips round in a roll
     const tx = rolling ? 1.3 : air ? 0.9 - clamp(player.vh * 0.05, -0.5, 0.5) : 0.35 + 0.18 * Math.sin(runPhase * 2);
     R.tail.rotation.x += (tx - R.tail.rotation.x) * Math.min(1, dt * 12);
@@ -2299,14 +2309,14 @@ const canAct = () => state === 'play' && countdown <= 0;
 
 // ---- input ----
 let sw = null;
-stageEl.addEventListener('pointerdown', e => { audioInit(); sw = { x: e.clientX, y: e.clientY }; });
+stageEl.addEventListener('pointerdown', e => { audioInit(); skipIntro(); sw = { x: e.clientX, y: e.clientY }; });
 stageEl.addEventListener('pointerup', e => {
   if (!sw) return; const dx = e.clientX - sw.x, dy = e.clientY - sw.y; sw = null;
   if (!canAct() || Math.max(Math.abs(dx), Math.abs(dy)) < 30) return;
   if (Math.abs(dx) > Math.abs(dy)) moveLane(dx < 0 ? -1 : 1); else if (dy < 0) jump(); else rollDown();
 });
 window.addEventListener('keydown', e => {
-  audioInit();
+  audioInit(); skipIntro();
   const k = e.key;
   if (k === 'p' || k === 'P' || k === 'Escape') { if (state === 'play') pauseGame(); else if (state === 'paused') resumeGame(); e.preventDefault(); return; }
   if (!canAct()) return;
@@ -2328,7 +2338,7 @@ AU.muted = safeGet(KEY_MUTE) === '1'; setMuted(AU.muted);
 
 // ---- screens ----
 function setPlayUI(on) { hud.style.display = on ? 'flex' : 'none'; pauseBtn.style.display = on ? 'block' : 'none'; pwUI.style.display = on ? 'flex' : 'none'; if (!on) bearUI.style.display = 'none'; }
-function startGame() { audioInit(); reset(); state = 'play'; overlay.classList.add('hidden'); setPlayUI(true); popup('RUN!', '#2E7D32'); mEvent('runs'); }
+function startGame() { audioInit(); reset(); state = 'intro'; introT = 0; headYaw = 0; buildIntro(); overlay.classList.add('hidden'); setPlayUI(false); mEvent('runs'); }
 const coinImg = () => { const ce = img('homer-emblem'); return ce ? `<img src="${ce.src}" alt="">` : '&#9679; '; };
 const bankHTML = () => `<div class="bankrow"><span>${coinImg()}${bank.toLocaleString()}</span><span>Score x${MS.mult}</span></div>`;
 function panel(title, body) {
@@ -2365,7 +2375,7 @@ function showShop() {
   });
 }
 function showTitle() {
-  state = 'title'; setPlayUI(false); overlay.classList.remove('hidden'); jetSound(false);
+  state = 'title'; setPlayUI(false); overlay.classList.remove('hidden'); jetSound(false); clearIntro(); introT = -1;
   if (player) clearObjects();
   if (runner) { runner.visible = true; R.pivot.rotation.x = 0; }
   idleDist = dist;
@@ -2839,6 +2849,8 @@ function syncScene(dt, viewDist) {
   swimY += (sinkT - swimY) * Math.min(1, dt * (sinkT > swimY ? 7 : 12));
   const bobY = wetNow && player.roll <= 0 ? 0.05 * Math.sin(time * 4.4) : 0;
   runner.position.set(player.xw, player.h - swimY + bobY, 0);
+  if (state === 'intro') runner.position.y = introT < INTRO_UP ? -0.5 : 0.45 * Math.sin(Math.PI * clamp((introT - INTRO_UP) / 0.45, 0, 1));
+  if (introG) { introG.position.z = viewDist; if (viewDist > 45) clearIntro(); }
   if (state === 'play') swimFx(dt, wetNow);
   setRunnerPose(dt);
   const GR = runner.userData.gear, live = state === 'play' || state === 'paused';
@@ -2884,6 +2896,7 @@ function syncScene(dt, viewDist) {
   sun.position.set(camX - 9, 24, 8); sun.target.position.set(camX, 0, -14);
 
   // bear
+  if (state === 'intro') { /* the intro moves the bear itself */ } else {
   const showBear = state !== 'title' && (bearD < 0.98 || time - lastNear < 2.5 || state === 'over');
   if (showBear && !bear.visible) bear.position.set(player.xw * 0.9, 0, 7);
   bear.visible = showBear;
@@ -2893,6 +2906,7 @@ function syncScene(dt, viewDist) {
     bear.position.z += (bz - bear.position.z) * Math.min(1, dt * (over ? 3 : 6));
     bear.rotation.x = over ? -0.35 * smooth(deathT / 0.6) : 0;
     bear.userData.legs.forEach((l, i) => { l.rotation.x = Math.sin(bt * (over && deathT > 0.8 ? 4 : 16) + (i % 2 ? Math.PI : 0)) * 0.6; });
+  }
   }
 
   // camera: follows the runner like Subway Surfers, rises when he's on a roof
@@ -2911,6 +2925,19 @@ function syncScene(dt, viewDist) {
   camKick = Math.max(0, camKick - dt * 0.9);
   camera.position.set(camX + sx, camY + sy - camKick, CAM.z);
   camera.lookAt(camX * 0.85, (CAM.ly + player.h * 0.45) * (1 - skyK) + (player.h - 1.6) * skyK, CAM.lz);
+  // intro: a low shot from in front of the camper (fire in the foreground, the bear creeping up behind him), then the
+  // camera swings round his right side to the usual chase view
+  if (introT >= 0 && introT < INTRO_UP + INTRO_ORBIT) {
+    const u = smooth((introT - INTRO_UP) / INTRO_ORBIT), a = Math.PI * (1 - u), r = 4.6 + (CAM.z - 4.6) * u, push = introT < INTRO_UP ? 0.5 * smooth(introT / INTRO_SEE) : 0.5;
+    const ix = -0.9 + sx, iy = 1.7 + sy, iz = -5.4 + push;
+    const px = (ix + (camX - ix) * u) - Math.sin(a) * r * 0.85, py = iy + (camY - iy) * u, pz = u > 0 ? Math.cos(a) * r : iz;
+    camera.position.set(px, py, pz);
+    // keep the camper in frame while swinging round, then settle on the usual look-ahead point
+    const lx = introT < INTRO_SEE ? 0.45 : 0.05, lz = introT < INTRO_SEE ? 0.6 : 1.4, w = smooth((u - 0.45) / 0.55);
+    const rx = lx + (player.xw - lx) * u, ry = 1.0, rz = lz * (1 - u);
+    introLook.set(rx + (camX * 0.85 - rx) * w, ry + (CAM.ly + player.h * 0.45 - ry) * w, rz + (CAM.lz - rz) * w);
+    camera.lookAt(introLook);
+  } else if (introT >= 0 && state !== 'intro') introT = -1;
   if (window.__cam) { const c = window.__cam; camera.position.set(player.xw + c[0], c[1], c[2]); camera.lookAt(player.xw, c[3], c[4]); }   // test hook: side views
   // the track curves gently left and right as you run, and always rolls away over a rise
   const inHouse = stageAt(viewDist).id === 'house' && skyK < 0.5;
@@ -2962,14 +2989,75 @@ function autoQuality(dt) {
   if (qLevel === 3) { sun.castShadow = false; }
 }
 
+// ================= INTRO: a quiet moment at camp... then the bear =================
+// The camper sits on a log roasting a marshmallow by the fire. A bear creeps up behind him and roars; he leaps up, the
+// camera swings round behind him and the run begins. Tap to skip.
+const INTRO_SEE = 1.6, INTRO_UP = 2.15, INTRO_LEN = 2.75, INTRO_ORBIT = 1.25;
+let introT = -1, introG = null, introStick = null, introLook = new THREE.Vector3(), headYaw = 0;
+function buildIntro() {
+  if (introG) scene.remove(introG);
+  const g = new THREE.Group();
+  const fire = P3['campfire'](1, 0); fire.scale.setScalar(1.3); fire.position.set(0.95, 0, -1.55); g.add(fire);
+  const glow = new THREE.Mesh(new THREE.CircleGeometry(1.6, 24), new THREE.MeshBasicMaterial({ map: softTex, color: 0xFF8A30, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending, toneMapped: false }));
+  glow.rotation.x = -Math.PI / 2; glow.position.set(0.95, 0.03, -1.55); g.add(glow);
+  const log = cyl(0.21, 0.21, 1.7, fmat('log', 0x8A5A33), 10); log.rotation.z = Math.PI / 2; log.position.set(0.15, 0.21, 0.15); g.add(log);
+  for (const x of [-0.7, 1.0]) { const e = cyl(0.2, 0.2, 0.02, fmat('logend', 0xD9B07A), 10); e.rotation.z = Math.PI / 2; e.position.set(x, 0.21, 0.15); g.add(e); }
+  const tent = BUILD.tent(0.9); tent.position.set(-3.7, 0, 1.4); tent.rotation.y = 0.6; g.add(castShadows(tent));
+  const lamp = P3['lantern-post'](3.2, 0); lamp.position.set(2.9, 0, 0.4); g.add(lamp);
+  const pack = box(0.5, 0.6, 0.35, mat('introPack', { color: 0x2E7D32, roughness: 0.8 }), 0.08); pack.position.set(-1.25, 0.3, 0.5); pack.rotation.y = -0.4; g.add(pack);
+  // the woods behind the camp, where the bear comes from (the run's track only starts here, so dress the view back)
+  const lawn = cachedMat('yardsideoutdoor', () => new THREE.MeshStandardMaterial({ color: 0x6DB848, roughness: 0.95 }));
+  const ground = new THREE.Mesh(new THREE.PlaneGeometry(90, 70), lawn); ground.rotation.x = -Math.PI / 2; ground.position.set(0, -0.03, 32); g.add(ground);
+  for (let i = 0; i < 26; i++) {
+    const row = i % 2, x = -24 + (i >> 1) * 4 + (hash(i * 7) - 0.5) * 2, z = 11 + row * 6 + hash(i * 3) * 4;
+    if (Math.abs(x) < 2.2 && row === 0) continue;   // a gap in the trees for the bear
+    const t = P3[hash(i) > 0.3 ? 'pine-tall' : 'pine-round'](6 + hash(i * 5) * 3, i); t.position.set(x, 0, z); g.add(t);
+  }
+  for (let i = 0; i < 8; i++) { const b = P3['bush'](1.6, i); b.position.set(-9 + i * 2.6, 0, 9 + hash(i * 11) * 2); g.add(b); }
+  castShadows(g); scene.add(g); introG = g;
+  // marshmallow on a stick, held out over the fire
+  if (introStick) introStick.parent && introStick.parent.remove(introStick);
+  const st = new THREE.Group();
+  st.add(at(cyl(0.015, 0.015, 1.05, fmat('stick', 0x7A5232), 5), 0, -0.55, 0));
+  st.add(at(cyl(0.05, 0.05, 0.09, mat('mallow', { color: 0xFFF3DC, emissive: 0x332200, roughness: 0.6 }), 10), 0, -1.06, 0));
+  st.position.y = -0.24; st.rotation.x = 1.1; st.rotation.z = 0.25; R.aR.el.add(st); introStick = st;
+}
+function clearIntro() {
+  if (introG) { scene.remove(introG); introG = null; }
+  if (introStick) { introStick.parent && introStick.parent.remove(introStick); introStick = null; }
+}
+function updateIntro(dt) {
+  const t = introT;
+  // the bear: creeps in from behind, rears up and roars, then drops and charges
+  bear.visible = true; bear.position.x = -0.7;
+  if (t < INTRO_SEE) { bear.position.z = 15 - 10.6 * smooth(t / INTRO_SEE); bear.rotation.x = 0; }
+  else if (t < INTRO_UP) { bear.rotation.x = -0.55 * smooth((t - INTRO_SEE) / 0.18); bear.position.z = 4.4; }
+  else { bear.rotation.x *= Math.max(0, 1 - dt * 10); bear.position.z = Math.max(3.4, bear.position.z - dt * 6); }
+  const walk = t < INTRO_SEE || t > INTRO_UP;
+  bear.userData.legs.forEach((l, i) => { l.rotation.x = walk ? Math.sin(time * (t < INTRO_SEE ? 8 : 16) + (i % 2 ? Math.PI : 0)) * 0.6 : -0.5; });
+  if (t >= INTRO_SEE && t - dt < INTRO_SEE) { sfx('bear'); shake = 0.3; popup('!', '#D32F2F', 30); }
+  if (t >= INTRO_UP && t - dt < INTRO_UP) {      // flings the marshmallow and leaps up
+    if (introStick) { introStick.visible = false; for (let i = 0; i < 6; i++) spawnPart({ x: 0.4, s: 1.0, y: 1.3, vx: (Math.random() - 0.3) * 3, vy: 3 + Math.random() * 2, vz: (Math.random() - 0.5) * 2, g: 12, size: 0.12, grow: 0, life: 0.6, color: 0xFFF3DC, op: 1 }); }
+    sfx('jump'); popup('RUN!', '#2E7D32', 40);
+  }
+  if (t >= INTRO_LEN) beginRun();
+}
+function beginRun() {
+  introT = Math.max(introT, INTRO_LEN);
+  state = 'play'; setPlayUI(true); lastNear = time; countdown = 0; lastTs = 0;
+  if (introStick) introStick.visible = false;
+}
+function skipIntro() { if (state === 'intro' && introT < INTRO_UP - 0.05) introT = INTRO_UP - 0.05; }
+
 // ================= LOOP =================
 let lastTs = 0, idleDist = 0;
 function frame(ts) {
   requestAnimationFrame(frame);
   if (!lastTs) lastTs = ts;
   const dt = Math.min(0.05, (ts - lastTs) / 1000); lastTs = ts;
-  if (state === 'play' && !window.__pause) { if (countdown > 0) countdown = Math.max(0, countdown - dt); else update(dt); }
+  if (state === 'play' && !window.__pause) { if (introT >= 0) introT += dt; if (countdown > 0) countdown = Math.max(0, countdown - dt); else update(dt); }   // introT: finish the intro's camera swing
   else if (state === 'title') { idleDist += dt * 10; time += dt; }
+  else if (state === 'intro') { introT += dt; time += dt; updateIntro(dt); }
   const vd = state === 'title' ? idleDist : dist;
   if (state === 'title') { dist = idleDist; }
   syncScene(dt, vd);

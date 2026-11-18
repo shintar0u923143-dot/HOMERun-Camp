@@ -27,7 +27,7 @@ if test and ('game3d' in SRC.get(target, '') or 'full3d' in SRC.get(target, ''))
     out = out.replace('https://cdn.jsdelivr.net/npm/three@0.160.0/', '/three/')
     out = out.replace("/*TEST_HOOK*/", '''
 window.__t = {
-  go(d, lane) { playerName = 'Test'; startGame(); dist = d; lastStage = stageAt(d).i; rebuildChunks(); if (lane !== undefined) { player.lane = lane; player.xw = laneX(lane); camX = player.xw * 0.8; } },
+  go(d, lane) { playerName = 'Test'; startGame(); beginRun(); introT = -1; clearIntro(); bear.visible = false; dist = d; lastStage = stageAt(d).i; rebuildChunks(); if (lane !== undefined) { player.lane = lane; player.xw = laneX(lane); camX = player.xw * 0.8; } },
   spawn(type, lane, ahead, opts) { return addObstacle(type, lane, dist + ahead, opts || {}); }, train(lane, ahead) { return addVanTrain(lane, dist + ahead); }, setLane(l) { player.lane = l; player.xw = laneX(l); }, key(k) { window.dispatchEvent(new KeyboardEvent('keydown', { key: k })); }, tick(n, dt) { for (let i = 0; i < n; i++) update(dt || 1 / 60); },
   clear() { clearObjects(); },
   set(k, v) { if (k === 'h') player.h = v; if (k === 'roll') player.roll = v; if (k === 'air') { player.airborne = true; player.h = v; player.vh = 0; } if (k === 'bear') { bearD = v; lastNear = time; } },

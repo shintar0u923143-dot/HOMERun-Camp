@@ -86,8 +86,31 @@
   .shop .lv i.on{background:#6DBE45}
   .card .shop button{width:auto;flex:none;margin:0;padding:8px 10px;font-size:13px;white-space:nowrap}
   .hint{font-size:12px;color:#4E7A3A;margin:6px 0 2px}
+  .card button.promo{background:linear-gradient(90deg,#F2A900,#E57C00);box-shadow:0 4px 0 #9C5400}
+  .promobox{margin:10px 0 2px;padding:10px;border-radius:12px;background:#FFF1C9;border:2px dashed #F2A900;font-size:13px}
+  .promobox b{color:#9C5400}
+  .lbmsg{font-size:12px;color:#4E7A3A;margin-top:4px}
+  #promo{position:absolute;inset:0;z-index:6;display:none;align-items:center;justify-content:center;background:rgba(15,40,15,.6)}
+  #promo.on{display:flex}
+  #promo form{background:#FFF8E7;color:#1B1B1B;border-radius:18px;padding:16px;width:90%;max-width:420px;max-height:94%;overflow:auto;box-shadow:0 10px 30px rgba(0,0,0,.45);font-size:14px}
+  #promo h2{margin:0 0 4px;color:#2E7D32;font-size:22px;text-align:center}
+  #promo .lead{text-align:center;margin:0 0 6px}
+  #promo .gift{display:block;text-align:center;font-weight:800;color:#9C5400;background:#FFF1C9;border-radius:10px;padding:6px;margin:6px 0}
+  #promo label.f{display:block;font-weight:700;margin:8px 0 3px;color:#2E7D32}
+  #promo input[type=text],#promo input[type=email],#promo input[type=tel]{box-sizing:border-box;width:100%;font-size:16px;padding:10px;border-radius:10px;border:2px solid #9CC58A;background:#fff}
+  #promo label.chk{display:flex;gap:8px;align-items:flex-start;margin:8px 0;font-size:13px}
+  #promo label.chk input{width:20px;height:20px;flex:none;margin-top:1px}
+  #promo details{font-size:12px;margin:6px 0;color:#333}
+  #promo summary{cursor:pointer;font-weight:700;color:#2E7D32}
+  #promo .msg{min-height:18px;color:#D32F2F;font-weight:700;text-align:center;margin:4px 0}
+  #promo .row{display:flex;gap:8px}
+  #promo .row button{flex:1;padding:12px;border:0;border-radius:12px;font-size:16px;font-weight:800;color:#fff;cursor:pointer}
+  #promo .go{background:#6DBE45;box-shadow:0 4px 0 #2E7D32}
+  #promo .no{background:#9E9E9E;box-shadow:0 4px 0 #616161}
+  #promo .draft{background:#D32F2F;color:#fff;font-weight:800;font-size:11px;text-align:center;border-radius:6px;padding:3px;margin-bottom:6px;display:none}
   #loading{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:800;font-size:18px;background:#1f4d1c;z-index:4}
 </style>
+<script src="config.js"></script>
 <script type="importmap">
 { "imports": {
   "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
@@ -108,6 +131,20 @@
   <button id="pauseBtn" aria-label="Pause">&#10074;&#10074;</button>
   <button id="muteBtn" aria-label="Sound on or off"></button>
   <div id="overlay"><div class="card" id="card"></div></div>
+  <div id="promo" role="dialog" aria-modal="true" aria-labelledby="pf_t"><form id="pf" novalidate autocomplete="on">
+    <div class="draft" id="pf_draft">DRAFT PREVIEW: for Marketing / DPO review only</div>
+    <h2 id="pf_t">HOMER Promos &amp; Events</h2>
+    <p class="lead">Be the first to know about HOMER camping, outdoor, ladder and cleaning promos, new products and events. Optional, and you can unsubscribe anytime.</p>
+    <span class="gift">&#127873; Sign up and get 500 bonus coins!</span>
+    <label class="f" for="pf_name">Full name</label><input type="text" id="pf_name" autocomplete="name" maxlength="60">
+    <label class="f" for="pf_email">Email address</label><input type="email" id="pf_email" autocomplete="email" maxlength="80" inputmode="email">
+    <label class="f" for="pf_mob">Mobile number</label><input type="tel" id="pf_mob" autocomplete="tel" inputmode="tel" maxlength="16" placeholder="09XX XXX XXXX">
+    <label class="chk"><input type="checkbox" id="pf_ok"><span id="pf_oktxt"></span></label>
+    <label class="chk"><input type="checkbox" id="pf_age"><span>I am 18 years old or above.</span></label>
+    <details><summary>Read the Privacy Notice</summary><div id="pf_notice"></div></details>
+    <div class="msg" id="pf_msg" aria-live="polite"></div>
+    <div class="row"><button type="button" class="no" id="pf_no">No thanks</button><button type="submit" class="go" id="pf_go">SIGN ME UP</button></div>
+  </form></div>
   <div id="loading">Loading HOMERun Camp...</div>
 </div>
 
@@ -2103,6 +2140,88 @@ function claimDaily() {
   const n = 100 * DAILY.streak; addBank(n); return n;
 }
 
+// ================= ONLINE TOP 10 + PROMO SIGN-UP =================
+// Same setup as the ARGOPOWER game: a Google Sheet with an Apps Script web app (apps-script/Code.gs). The link lives in
+// config.js so updating the game never erases it. With no link the game keeps a Top 10 on this device only.
+const API_URL = String(window.API_URL || '').trim();
+const KEY_DID = 'homer-camp-run-did', KEY_JOINED = 'homer-camp-run-joined', KEY_LB = 'homer-camp-run-lb';
+let did = safeGet(KEY_DID);
+if (!did) { did = (Math.random().toString(36).slice(2, 10) + Date.now().toString(36)).replace(/\W/g, '').slice(0, 20); safeSet(KEY_DID, did); }
+let lbRows = (() => { try { return JSON.parse(safeGet(KEY_LB)) || []; } catch (e) { return []; } })(), lbMsg = '';
+function post(body, done, tries = 0) {
+  fetch(API_URL, { method: 'POST', headers: { 'Content-Type': 'text/plain;charset=utf-8' }, body: JSON.stringify(body) })
+    .then(r => r.json())
+    .then(j => { if (!j.ok && /busy|server/i.test(j.err || '') && tries < 3) setTimeout(() => post(body, done, tries + 1), 1500 + Math.random() * 2500); else done(j); })
+    .catch(() => { if (tries < 2) setTimeout(() => post(body, done, tries + 1), 3000); else done({ ok: false, err: 'No connection' }); });
+}
+function fetchTop(done) {
+  if (!API_URL) { done && done(); return; }
+  fetch(API_URL + '?action=top&t=' + Date.now()).then(r => r.json()).then(j => {
+    if (j.ok) { lbRows = j.rows; lbMsg = ''; safeSet(KEY_LB, JSON.stringify(j.rows.slice(0, 10))); } else lbMsg = 'Could not load the board, try again later';
+    done && done();
+  }).catch(() => { lbMsg = 'Offline: showing the last saved board'; done && done(); });
+}
+function submitScore(pts, secs, done) {
+  if (!API_URL) { done(null); return; }
+  post({ name: playerName.trim().slice(0, 16), did, score: pts, secs: Math.round(secs), mult: MS.mult }, j => done(j.ok ? j.rank : null, j.err));
+}
+function onlineBoardHTML(hlName) {
+  const list = lbRows.slice(0, 10);
+  if (!list.length) return `<div class="row"><span class="nm">${lbMsg || 'No scores yet. Be the first!'}</span></div>`;
+  return list.map((e, i) => `<div class="row ${i === 0 ? 'gold' : i === 1 ? 'silver' : i === 2 ? 'bronze' : ''} ${hlName && e.n === hlName ? 'me' : ''}"><span class="rk">${i + 1}</span><span class="nm">${esc(e.n)}</span><span class="sc">${(+e.s).toLocaleString()}</span></div>`).join('') +
+    (lbMsg ? `<div class="lbmsg">${lbMsg}</div>` : '');
+}
+
+/* ===== PROMO SIGN-UP (optional, consent-based, Data Privacy Act of 2012) =====
+   PROMO_ON=false keeps it hidden from the public; add ?promo=1 to the game link to preview it (for the demo).
+   Fill in the [bracketed] items in PRIV after the DPO / Legal review, then set PROMO_ON=true. */
+const PROMO_ON = false, PROMO_PREVIEW = /[?&]promo=1/.test(location.search), PROMO_BONUS = 500;
+const PRIV = { company: 'Co Ban Kiat Hardware, Inc. (CBK)', brand: 'HOMER', dpo: '[DPO email address]', keep: '[2 years]', policy: '[link to CBK privacy policy]' };
+const CONSENT_VER = '2026-11-draft1';
+const CONSENT_TXT = `I agree to receive promos, product news and event invitations from ${PRIV.company} / ${PRIV.brand} by email, SMS or phone call. I can unsubscribe anytime.`;
+const promoOn = () => PROMO_ON || PROMO_PREVIEW;
+let joined = !!safeGet(KEY_JOINED), promoShown = false;
+$('pf_oktxt').textContent = CONSENT_TXT;
+$('pf_draft').style.display = PROMO_ON ? 'none' : 'block';
+$('pf_notice').innerHTML = `<p><b>Who we are.</b> ${PRIV.company}, maker of ${PRIV.brand} outdoor, camping, ladder and household cleaning products, is the personal information controller for this sign-up.</p>
+<p><b>What we collect.</b> Your full name, email address and mobile number, the date and time you signed up, the consent you gave, and a random code that identifies this device's game. We do not collect anything else about you or your phone.</p>
+<p><b>Why.</b> Only to send you ${PRIV.brand} promos, product news and event invitations by email, SMS or phone call. Your details are never shown on the leaderboard and we will never sell them.</p>
+<p><b>Your choice.</b> Signing up is optional and is based on your consent. You can play and appear on the leaderboard without signing up.</p>
+<p><b>How long we keep it.</b> Until you unsubscribe or ask us to delete it, or ${PRIV.keep} after you sign up, whichever comes first. Then it is securely deleted.</p>
+<p><b>Who can see it.</b> Only authorized CBK Marketing staff, and service providers that send our messages for us under a confidentiality agreement.</p>
+<p><b>Your rights.</b> Under the Data Privacy Act of 2012 you may ask to see, correct or delete your data, withdraw your consent at any time, and file a complaint with the National Privacy Commission. Every promo message includes a way to unsubscribe. Contact our Data Protection Officer at ${PRIV.dpo}. Full policy: ${PRIV.policy}.</p>`;
+function openPromo() {
+  if (!promoOn() || joined) return;
+  promoShown = true; $('promo').classList.add('on'); $('pf_msg').textContent = ''; $('pf_go').disabled = false;
+  if (!$('pf_name').value && playerName) $('pf_name').value = playerName;
+  setTimeout(() => $('pf_email').focus(), 60);
+}
+function closePromo() { $('promo').classList.remove('on'); if (document.activeElement && document.activeElement.blur) document.activeElement.blur(); }
+function normMob(v) { let d = v.replace(/[^\d+]/g, ''); if (d.startsWith('+63')) d = '0' + d.slice(3); else if (d.startsWith('63') && d.length === 12) d = '0' + d.slice(2); return /^09\d{9}$/.test(d) ? '+63' + d.slice(1) : ''; }
+function afterJoin() {
+  joined = true; safeSet(KEY_JOINED, '1'); addBank(PROMO_BONUS); sfx('mission');
+  // refresh whichever menu is open so the coin bank and the sign-up button update
+  if (state === 'title') showTitle(); else if (state === 'over') { const b = card.querySelector('.promobox'); if (b) b.innerHTML = `<b>You're on the HOMER list!</b> +${PROMO_BONUS} coins added.`; }
+}
+['keydown', 'keyup', 'pointerdown', 'pointerup'].forEach(ev => $('promo').addEventListener(ev, e => e.stopPropagation()));
+$('pf_no').onclick = closePromo;
+$('promo').addEventListener('click', e => { if (e.target.id === 'promo') closePromo(); });
+$('pf').addEventListener('submit', e => {
+  e.preventDefault();
+  const m = $('pf_msg'), nm = $('pf_name').value.trim().replace(/\s+/g, ' '), em = $('pf_email').value.trim().toLowerCase(), mob = normMob($('pf_mob').value);
+  if (!/^[\p{L}][\p{L} .'-]{1,59}$/u.test(nm)) { m.textContent = 'Please enter your full name.'; return; }
+  if (!/^[^\s@]+@[^\s@]+\.[a-z]{2,}$/.test(em)) { m.textContent = 'Please enter a valid email address.'; return; }
+  if (!mob) { m.textContent = 'Please enter a valid PH mobile number (09XX XXX XXXX).'; return; }
+  if (!$('pf_ok').checked) { m.textContent = 'Please tick the box to agree to receive promos.'; return; }
+  if (!$('pf_age').checked) { m.textContent = 'Sign-up is for 18 years old and above only.'; return; }
+  if (!API_URL) { m.textContent = 'Preview only: not sent (scoreboard not connected yet).'; return; }
+  $('pf_go').disabled = true; m.textContent = 'Sending…';
+  post({ type: 'lead', name: nm, email: em, mobile: mob, ok: 1, age: 1, cv: CONSENT_VER, ct: CONSENT_TXT, did }, j => {
+    if (j.ok) { m.style.color = '#2E7D32'; m.textContent = `Thank you! You're on the list. +${PROMO_BONUS} coins!`; setTimeout(() => { closePromo(); m.style.color = ''; afterJoin(); }, 1400); }
+    else { m.textContent = j.err || 'Could not send, please try again.'; $('pf_go').disabled = false; }
+  });
+});
+
 // ================= GAME STATE =================
 let state = 'loading', playerName = safeGet(KEY_NAME);
 let player, obstacles = [], coins = [], pickups = [], dist = 0, speed = 12, nextS = 22, pts = 0, coinCount = 0, boostT = 0;
@@ -2228,7 +2347,11 @@ function showHow() {
     &bull; One life. Three stumbles or close calls in a row and the bear catches you!</div>
     <div class="how"><b>Power-ups</b><br>${Object.entries(POWERS).map(([k, P]) => `<img src="${PW_URL[k]}" style="width:22px;vertical-align:-6px;margin-right:6px">${P.name}: ${P.desc}`).join('<br>')}</div>`);
 }
-function showScores() { panel('TOP 10', `<div class="board">${boardHTML(null)}</div>`); }
+function showScores() {
+  const draw = () => { if (state !== 'title' || !card.querySelector('#topBoard')) return; card.querySelector('#topBoard').innerHTML = API_URL ? onlineBoardHTML(playerName) : boardHTML(null); };
+  panel('TOP 10', `<div class="board" id="topBoard">${API_URL ? onlineBoardHTML(playerName) : boardHTML(null)}</div>${API_URL ? '' : '<div class="lbmsg">Scores on this device</div>'}`);
+  if (API_URL) { if (!lbRows.length) lbMsg = 'Loading…'; draw(); fetchTop(draw); }
+}
 function showShop() {
   panel('SHOP', Object.entries(POWERS).map(([k, P]) => {
     const lv = ups[k], cost = UP_COST[lv];
@@ -2254,6 +2377,7 @@ function showTitle() {
     <div class="chars">${CHARS.map(c => `<button class="ch ${c.id === charId ? 'on' : ''}" data-id="${c.id}">${charThumbs[c.id] ? `<img src="${charThumbs[c.id]}" alt="">` : ''}<b>${c.name}</b><span>${c.tag}</span></button>`).join('')}</div>
     <input id="pname" maxlength="16" placeholder="Enter your name" value="${esc(playerName)}" />
     <button id="startBtn" ${playerName.trim() ? '' : 'disabled'}>START RUN</button>
+    ${promoOn() && !joined ? `<button id="promoBtn" class="promo">&#127873; JOIN HOMER PROMOS &middot; +${PROMO_BONUS} COINS</button>` : ''}
     <div class="menu"><button id="mMis">MISSIONS ${MS.list.filter(m => m.done).length}/3</button><button id="mShop">SHOP</button><button id="mHow">HOW TO PLAY</button><button id="mTop">TOP 10</button></div>`;
   const inp = card.querySelector('#pname'), btn = card.querySelector('#startBtn');
   const go = () => { const n = inp.value.trim(); if (!n) return; playerName = n; safeSet(KEY_NAME, n); startGame(); };
@@ -2261,6 +2385,7 @@ function showTitle() {
   inp.addEventListener('keydown', e => { e.stopPropagation(); if (e.key === 'Enter') go(); });
   btn.addEventListener('click', go);
   const db = card.querySelector('#dailyBtn'); if (db) db.onclick = () => { audioInit(); const n = claimDaily(); sfx('mission'); db.outerHTML = `<div class="hint" style="font-size:14px;font-weight:800;color:#B07800">+${n} coins! Come back tomorrow for more.</div>`; card.querySelector('.bankrow').outerHTML = bankHTML(); };
+  const pb = card.querySelector('#promoBtn'); if (pb) pb.onclick = () => { audioInit(); sfx('click'); openPromo(); };
   card.querySelector('#mMis').onclick = () => { sfx('click'); showMissions(); };
   card.querySelector('#mShop').onclick = () => { sfx('click'); showShop(); };
   card.querySelector('#mHow').onclick = () => { sfx('click'); showHow(); };
@@ -2271,16 +2396,26 @@ function showTitle() {
   }));
 }
 function showOver() {
-  const atT = Date.now(), pts = score(), rank = saveScore(playerName, pts, atT);
+  const atT = Date.now(), pts = score(), localRank = saveScore(playerName, pts, atT);
   addBank(coinCount); saveMS();
   setPlayUI(false); overlay.classList.remove('hidden');
+  const rankTxt = r => r && r <= 10 ? `You placed #${r} on the Top 10!` : r ? `Your rank: #${r}. Keep running to reach the Top 10!` : 'Keep running to reach the Top 10!';
+  const promoBox = promoOn() && !joined ? `<div class="promobox"><b>Get ${PROMO_BONUS} bonus coins!</b> Join HOMER Promos for news on camping, outdoor, ladder and cleaning deals.<button id="overPromo" class="promo">&#127873; JOIN &amp; GET ${PROMO_BONUS} COINS</button></div>` : '';
   card.innerHTML = `<div class="logo" style="font-size:30px">GAME OVER</div><div class="reason">${esc(deathReason)}</div>
-    <div class="big">${pts.toLocaleString()}</div><div>${esc(playerName)} &middot; ${rank ? 'You placed #' + rank + '!' : 'Keep running to reach the Top 10!'}</div>
+    <div class="big">${pts.toLocaleString()}</div><div>${esc(playerName)} &middot; <span id="rankTxt">${API_URL ? 'Sending your score…' : rankTxt(localRank)}</span></div>
+    ${promoBox}
     <div class="bankrow" style="margin-top:8px"><span>${Math.floor(dist * 0.5)} m</span><span>${coinImg()}+${coinCount}</span><span>Bank ${bank.toLocaleString()}</span></div>
     <div style="margin-top:6px"><b style="color:#2E7D32">Missions</b>${missionsHTML()}</div>
     <button id="againBtn">PLAY AGAIN</button><button id="newBtn" class="alt">MENU</button>
-    <div class="board"><b>Top 10 Scoreboard</b>${boardHTML(atT)}</div>`;
+    <div class="board"><b>Top 10 Scoreboard</b><div id="overBoard">${API_URL ? onlineBoardHTML(playerName) : boardHTML(atT)}</div></div>`;
   card.querySelector('#againBtn').onclick = startGame; card.querySelector('#newBtn').onclick = showTitle;
+  const op = card.querySelector('#overPromo'); if (op) op.onclick = () => { sfx('click'); openPromo(); };
+  if (API_URL) submitScore(pts, time, (rank, err) => {
+    const rt = card.querySelector('#rankTxt'); if (state !== 'over' || !rt) return;
+    rt.textContent = rank ? rankTxt(rank) : (err ? err + ' (saved on this device)' : 'Offline: saved on this device');
+    fetchTop(() => { const ob = card.querySelector('#overBoard'); if (state === 'over' && ob) ob.innerHTML = onlineBoardHTML(playerName); });
+  });
+  if (promoOn() && !joined && !promoShown) setTimeout(() => { if (state === 'over') openPromo(); }, 900);   // offer it once per visit
 }
 function pauseGame() {
   if (state !== 'play') return;

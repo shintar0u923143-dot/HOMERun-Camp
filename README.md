@@ -48,3 +48,17 @@ Needs Python 3 with Pillow, NumPy and SciPy.
 ## Scores
 
 The Top 10 scoreboard is currently saved on each device (browser storage).
+
+## Online Top 10 and HOMER promo sign-up
+
+Works the same way as the ARGOPOWER game: a Google Sheet with a small Apps Script web app.
+
+1. Go to sheets.new and name the sheet "HOMERun Camp Scores" (ideally from a CBK company Google account).
+2. Extensions > Apps Script. Paste all of `apps-script/Code.gs`, then Save.
+3. Deploy > New deployment > Web app. Execute as: Me. Who has access: Anyone. Deploy and authorize.
+4. Copy the web app link (ends in `/exec`) and paste it into `config.js` between the quotes. Commit.
+
+Scores go to the `scores` tab; promo sign-ups (name, email, mobile, consent) go to the private `contacts` tab and are never shown in the game.
+
+The sign-up form is hidden from the public until the DPO / Legal review is done. To preview it, open the game link with `?promo=1` at the end.
+To go live, fill in the `[bracketed]` items in `PRIV` in `src/game-full3d.html`, set `PROMO_ON = true`, and rebuild with `python3 tools/build.py`.
